@@ -10,14 +10,13 @@ import (
 
 const (
 	sessionRetryUp = 2 * time.Minute
-	// sessionHealthy is how long a session must have lasted for the next
-	// failure to start its backoff afresh.
+	// sessionHealthy: a session that lasted this long resets the backoff.
 	sessionHealthy = 2 * time.Minute
 )
 
-// listen holds a scale set's message session until ctx ends, reopening it
-// after a failure. Another session for the scale set, such as one left by a
-// crashed controller, makes opening fail until GitHub expires it.
+// listen holds s's message session until ctx ends, reopening it with backoff.
+// A session left open by a crashed controller blocks a new one until GitHub
+// expires it.
 func (c *Controller) listen(ctx context.Context, s *scaleSet) {
 	log := c.log.With("scale_set", s.cfg.Name)
 	failures := 0
@@ -62,16 +61,16 @@ func (c *Controller) session(ctx context.Context, s *scaleSet) error {
 			return err
 		}
 		if msg == nil {
-			// GitHub holds an empty poll open for about 50 seconds. One
-			// that comes back at once mustn't turn into a busy loop.
+			// Empty polls normally take ~50s; don't spin if one returns
+			// at once.
 			if wait := c.emptyPollWait - time.Since(polled); wait > 0 {
 				c.sleep(ctx, wait)
 			}
 			continue
 		}
 		last = msg.ID
-		// Acknowledged first, as GitHub's own listener does: the statistics
-		// in the next message correct anything this one's handling misses.
+		// Ack first, as the upstream listener does; the next message's
+		// statistics correct anything this one's handling misses.
 		if err := sess.DeleteMessage(ctx, msg.ID); err != nil {
 			return fmt.Errorf("acknowledging message %d: %w", msg.ID, err)
 		}
@@ -85,8 +84,8 @@ func (c *Controller) session(ctx context.Context, s *scaleSet) error {
 				acquireErr = fmt.Errorf("acquiring %d jobs: %w", len(ids), err)
 			}
 		}
-		// The message is acknowledged, so its other events are recorded
-		// even if acquiring failed: they won't come again.
+		// Record the events even if acquiring failed: the message is acked
+		// and won't be redelivered.
 		c.observe(s, msg.Statistics, msg)
 		if acquireErr != nil {
 			return acquireErr
@@ -123,16 +122,16 @@ func (c *Controller) observe(s *scaleSet, st actions.Statistics, msg *actions.Me
 		}
 	}
 	s.assigned = st.AssignedJobs
-	// Nothing waiting: whatever is still pending was missed leaving.
+	// Nothing waiting: anything still pending missed its started event.
 	if st.AssignedJobs <= st.RunningJobs {
 		clear(s.pending)
 	}
 	c.signal()
 }
 
-// ranJob marks the named runner busy, and done once its job completed: it
-// has run a job, so its scale set's runners start and work, and its
-// failures are forgotten. It is called with c.mu held.
+// ranJob marks the named runner busy, and done if its job completed. A
+// runner taking a job proves its scale set's runners work, so the failure
+// count resets. Call with c.mu held.
 func (c *Controller) ranJob(name string, done bool) {
 	if name == "" {
 		return

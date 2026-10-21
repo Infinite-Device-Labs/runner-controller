@@ -11,8 +11,8 @@ import (
 	"github.com/Infinite-Device-Labs/runner-controller/internal/systemd"
 )
 
-// recover reconciles the record of an earlier run with what systemd has
-// now, after a restart, a crash or a reboot:
+// recover reconciles the state file with what systemd has now, after a
+// restart, crash or reboot:
 //
 //   - a recorded unit still running is adopted, and its memory counted;
 //   - a recorded unit that has gone has its registration queued for
@@ -34,8 +34,8 @@ func (c *Controller) recover(ctx context.Context) error {
 func (c *Controller) recoverLocked(ctx context.Context) error {
 	st, err := loadState(c.stateDir)
 	if err != nil {
-		// A record that can't be read is set aside rather than blocking
-		// every start: systemd still says which units are running.
+		// Set an unreadable file aside rather than refuse to start; systemd
+		// still knows which units are running.
 		aside := filepath.Join(c.stateDir, stateFile+".unreadable")
 		c.log.Error("the state file can't be read; setting it aside and recovering from systemd alone", "moved_to", aside, "error", err)
 		if err := os.Rename(filepath.Join(c.stateDir, stateFile), aside); err != nil {
@@ -77,8 +77,8 @@ func (c *Controller) recoverLocked(ctx context.Context) error {
 			}
 			delete(recorded, unit)
 			if known && c.byName[rec.ScaleSet] != nil {
-				// Whether its job has started isn't known; counting it busy
-				// only means its scale set's waiting jobs look older.
+				// Its job is unknown. Counting it busy only makes its scale
+				// set's waiting jobs look older; scale-down probes it.
 				c.runners[unit] = &runner{record: rec, unit: unit, started: true, startedAt: c.now(), busy: true, adopted: true}
 				c.log.Info("adopted a running unit", "unit", unit, "scale_set", rec.ScaleSet, "runner", rec.Name)
 				continue

@@ -1,10 +1,8 @@
-// Package actions is the controller's only view of GitHub's runner scale set
-// API.
+// Package actions wraps GitHub's runner scale set API.
 //
-// actions/scaleset is in public preview and its interfaces may change, so
-// everything that touches it lives here, behind Client and Session. The rest
-// of the controller sees only the types below, and its tests use fakes of
-// these two interfaces.
+// actions/scaleset is in public preview, so only this package imports it.
+// The controller sees Client, Session and the types below, and fakes the two
+// interfaces in its tests.
 package actions
 
 import (
@@ -13,23 +11,20 @@ import (
 	"time"
 )
 
-// Client is what the controller does with one organisation's or one
-// repository's scale set API.
+// Client is the scale set API of one organisation or repository.
 type Client interface {
-	// EnsureScaleSet returns the ID of the named scale set, creating it, or
-	// updating its labels to match, as needed.
+	// EnsureScaleSet returns the scale set's ID, creating it or updating its
+	// labels as needed.
 	EnsureScaleSet(ctx context.Context, spec ScaleSetSpec) (int, error)
-	// OpenSession starts the scale set's message session. Only one can be
-	// open per scale set at a time.
+	// OpenSession opens the scale set's message session; only one may be
+	// open at a time.
 	OpenSession(ctx context.Context, scaleSetID int, owner string) (Session, error)
-	// GenerateJITConfig registers a runner and returns the configuration
-	// that lets it run exactly one job.
+	// GenerateJITConfig registers a single-job runner and returns its
+	// config.
 	GenerateJITConfig(ctx context.Context, scaleSetID int, runnerName string) (*JITConfig, error)
-	// RemoveRunner deletes a runner's registration, by its ID or, when the
-	// ID is 0 because GenerateJITConfig's answer never arrived, by its name.
-	// A registration that is already gone is not an error. While GitHub
-	// still counts the runner's job as running, it returns
-	// ErrJobStillRunning.
+	// RemoveRunner deletes a registration by ID, or by name when the ID is
+	// 0 (GenerateJITConfig's answer was lost). Already gone is not an error;
+	// a runner with a job yields ErrJobStillRunning.
 	RemoveRunner(ctx context.Context, runnerID int64, name string) error
 }
 
@@ -37,11 +32,11 @@ type Client interface {
 type Session interface {
 	// Statistics are the scale set's statistics when the session opened.
 	Statistics() Statistics
-	// GetMessage waits up to about 50 seconds for the message after
-	// lastMessageID, and returns nil if none arrived. maxCapacity tells
-	// GitHub how many runners the scale set could have at once.
+	// GetMessage long-polls (~50s) for the message after lastMessageID and
+	// returns nil if none arrived. maxCapacity is the most runners the scale
+	// set could have at once.
 	GetMessage(ctx context.Context, lastMessageID, maxCapacity int) (*Message, error)
-	// DeleteMessage acknowledges a message, so it isn't delivered again.
+	// DeleteMessage acknowledges a message.
 	DeleteMessage(ctx context.Context, messageID int) error
 	// AcquireJobs claims available jobs for the scale set.
 	AcquireJobs(ctx context.Context, requestIDs []int64) error
@@ -49,41 +44,39 @@ type Session interface {
 	Close(ctx context.Context) error
 }
 
-// ErrJobStillRunning is RemoveRunner's error while GitHub still counts the
-// runner's job as running. It clears once GitHub gives up on the runner.
+// ErrJobStillRunning: GitHub still counts the runner's job as running. It
+// clears once the job ends or GitHub gives up on the runner.
 var ErrJobStillRunning = errors.New("the runner's job is still running")
 
-// ScaleSetSpec is a scale set as the configuration declares it.
+// ScaleSetSpec is a scale set as configured.
 type ScaleSetSpec struct {
 	Name        string
 	RunnerGroup string
 	Labels      []string
 }
 
-// JITConfig is a registered runner and the configuration it starts with.
+// JITConfig is a registered runner and its config.
 type JITConfig struct {
 	RunnerID int64
-	// Encoded is the value of the runner's --jitconfig, or of
-	// ACTIONS_RUNNER_INPUT_JITCONFIG.
+	// Encoded is the value for --jitconfig or ACTIONS_RUNNER_INPUT_JITCONFIG.
 	Encoded string
 }
 
-// Statistics are GitHub's counts for a scale set. They are always current,
-// unlike a message's job events, which are capped at 50 per message.
+// Statistics are GitHub's current counts for a scale set, complete where a
+// message's job events (capped at 50) may not be.
 type Statistics struct {
-	// AssignedJobs are the jobs assigned to the scale set, whether waiting
-	// for a runner or running. It is the number of runners the scale set
-	// needs.
+	// AssignedJobs counts jobs assigned, waiting or running: the runners
+	// needed before min_runners.
 	AssignedJobs int
-	// RunningJobs are the assigned jobs a runner has started.
+	// RunningJobs counts assigned jobs a runner has started.
 	RunningJobs int
 }
 
-// Message is one batch of a session's events.
+// Message is one batch of session events.
 type Message struct {
 	ID         int
 	Statistics Statistics
-	// Available jobs are acquired before anything else is done.
+	// Available jobs must be acquired for the scale set.
 	Available []Job
 	Assigned  []Job
 	Started   []Job
@@ -92,12 +85,12 @@ type Message struct {
 
 // Job is one job event.
 type Job struct {
-	// RequestID identifies the job across its events.
+	// RequestID identifies the job across events.
 	RequestID int64
 	// QueueTime is when the job was queued.
 	QueueTime time.Time
-	// RunnerName is the runner a started or completed job ran on.
+	// RunnerName is set on started and completed events.
 	RunnerName string
-	// Result is a completed job's result, such as "succeeded" or "canceled".
+	// Result is set on completed events: "succeeded", "canceled", ...
 	Result string
 }

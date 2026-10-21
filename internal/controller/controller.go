@@ -1,6 +1,7 @@
-// Package controller decides when to start a runner, and for which scale set,
-// within one memory budget. systemd runs the runners; the controller starts
-// their units, writes each one's JIT config file, and cleans up after them.
+// Package controller decides when to start and stop runners, and for which
+// scale set, within one memory budget. systemd runs them; the controller
+// starts and stops their units, writes each one's JIT config file, and cleans
+// up after them.
 package controller
 
 import (
@@ -37,31 +38,26 @@ type Controller struct {
 	// now and suffix are replaced in tests.
 	now    func() time.Time
 	suffix func() string
-	// tick is how often units are checked when nothing else wakes the
-	// controller.
+	// tick is the reconcile interval when nothing else wakes the loop.
 	tick time.Duration
 	// sessionRetry is the first wait before a failed session is reopened.
 	sessionRetry time.Duration
-	// emptyPollWait is the least time between the starts of two polls that
-	// bring no message, in case GitHub stops holding them open.
+	// emptyPollWait is the minimum interval between empty polls, in case
+	// GitHub stops holding them open.
 	emptyPollWait time.Duration
 	// sleep waits for d or until ctx ends; replaced in tests.
 	sleep func(ctx context.Context, d time.Duration)
 
 	mu sync.Mutex
-	// runners are the units started and not yet seen to exit, by unit name.
-	// Their pools' memory is what the budget counts.
+	// runners are the live units, by unit name; the budget counts them.
 	runners  map[string]*runner
 	removals []*removal
-	// blocked is the scale set the budget last held back, so it is logged
-	// once rather than on every tick.
+	// blocked is the scale set the budget last held back, logged once.
 	blocked *scaleSet
-	// seq numbers the snapshots of the state taken to be saved.
+	// seq numbers state snapshots taken by save.
 	seq uint64
 
-	// saveMu serialises writes of the state file. written is the newest
-	// snapshot on disk, so an older one that lost the race isn't written
-	// over it.
+	// saveMu serialises state file writes; written is the seq on disk.
 	saveMu  sync.Mutex
 	written uint64
 
@@ -80,18 +76,16 @@ type scaleSet struct {
 
 	// The rest is guarded by Controller.mu.
 
-	// assigned is GitHub's count of jobs assigned to the scale set, waiting
-	// or running: the number of runners it needs.
+	// assigned is GitHub's count of jobs assigned, waiting or running.
 	assigned int
-	// pending are the jobs assigned and not yet started, with when each was
-	// queued. Messages carry at most 50 events, so this can miss jobs; it
-	// only orders the scale sets, and assigned decides how many runners.
+	// pending maps assigned, not yet started jobs to their queue times.
+	// Messages carry at most 50 events, so it can miss jobs: it only orders
+	// scale sets, while assigned decides how many runners.
 	pending map[int64]time.Time
-	// demandSince is when the scale set last went from needing no runner to
-	// needing one.
+	// demandSince is when the scale set last started needing a runner.
 	demandSince time.Time
-	// failures counts the runners in a row that failed to start or exited
-	// without running a job, and retryAt holds the next start back.
+	// failures counts consecutive runners that failed to start or exited
+	// without a job; retryAt is when the next start may happen.
 	failures int
 	retryAt  time.Time
 }
@@ -100,30 +94,27 @@ type scaleSet struct {
 type runner struct {
 	record
 	unit string
-	// started is set once systemctl start has returned. Before then the
-	// unit isn't checked for having exited, though its memory counts.
+	// started: systemctl start has returned. Until then the unit isn't
+	// polled for exit, though its memory counts.
 	started bool
-	// startedAt is when systemctl start returned, or when a running unit
-	// was adopted.
+	// startedAt: when systemctl start returned, or when the unit was adopted.
 	startedAt time.Time
-	// busy is set once it is seen to run a job, and done once that job
-	// has completed: the runner is about to exit, and no longer counts
-	// towards its scale set's runners.
+	// busy: seen running a job. done: that job completed, so the runner is
+	// about to exit and no longer counts towards its scale set.
 	busy bool
 	done bool
-	// adopted is a unit found running at startup whose job isn't known. It
-	// counts as busy until GitHub says otherwise.
+	// adopted: found running at startup, job unknown. Counts as busy until
+	// GitHub says otherwise.
 	adopted bool
-	// foreign is a running unit in a pool's template that the controller
-	// has no record of. It counts against the budget until it exits.
+	// foreign: a running instance of a pool's template with no record.
+	// Counts against the budget until it exits; otherwise left alone.
 	foreign bool
 
-	// Scaling down: stopping is set while its registration is being
-	// removed, deregistered once that succeeded, and stopRequested once
-	// systemd took the stop. A deregistered runner can't take a job, so it
-	// no longer counts towards its scale set's runners, though its memory
-	// counts until its unit exits. nextScaleDown holds back another attempt
-	// after one failed.
+	// Scale-down progress: stopping while the registration is being removed,
+	// deregistered once it is, stopRequested once systemd accepted the stop.
+	// A deregistered runner can't take a job, so it no longer counts towards
+	// its scale set, but its memory does until the unit exits. nextScaleDown
+	// delays a retry after a failed attempt.
 	stopping      bool
 	deregistered  bool
 	stopRequested bool
@@ -166,9 +157,9 @@ func New(cfg *config.Config, clients map[string]actions.Client, sd systemd.Manag
 	return c, nil
 }
 
-// Run creates or reuses the scale sets, cleans up after an earlier run, and
-// then starts runners as jobs arrive until ctx ends. Units still running
-// then are left to finish their jobs; the next run adopts them.
+// Run ensures the scale sets exist, recovers from an earlier run, then
+// manages runners until ctx ends. Running units are left to finish their
+// jobs; the next run adopts them.
 func (c *Controller) Run(ctx context.Context) error {
 	for _, s := range c.sets {
 		id, err := s.client.EnsureScaleSet(ctx, actions.ScaleSetSpec{
@@ -221,8 +212,8 @@ func (c *Controller) signal() {
 	}
 }
 
-// reconcile frees what exited units held, retries the registrations still
-// to remove, and starts what the budget allows.
+// reconcile releases exited units, retries pending registration removals,
+// stops surplus idle runners, and starts what the budget allows.
 func (c *Controller) reconcile(ctx context.Context) {
 	c.checkUnits(ctx)
 	c.removeRegistrations(ctx)
@@ -256,7 +247,8 @@ func (c *Controller) checkUnits(ctx context.Context) {
 }
 
 // release cleans up after a unit that has exited or never started, then
-// frees its slot and its memory. Its registration is queued for removal.
+// frees its slot and memory. Unless scale-down already deregistered the
+// runner, its registration is queued for removal.
 func (c *Controller) release(ctx context.Context, unit string, failed bool) {
 	ctx = context.WithoutCancel(ctx)
 	c.mu.Lock()
@@ -279,14 +271,12 @@ func (c *Controller) release(ctx context.Context, unit string, failed bool) {
 
 	c.mu.Lock()
 	delete(c.runners, unit)
-	// A runner stopped for being idle was deregistered first, and didn't
-	// fail.
 	if !r.foreign && !r.deregistered {
 		now := c.now()
 		c.removals = append(c.removals, &removal{ScaleSet: r.ScaleSet, RunnerID: r.ID, Name: r.Name, Since: now, Next: now})
-		// A runner that exits without having run a job has failed, however
-		// its unit ended. Otherwise one that crashes as it starts would be
-		// replaced at once, for as long as its job waits.
+		// Exiting without running a job is a failure whatever the unit's
+		// result; otherwise a runner that crashes on start is replaced in a
+		// tight loop for as long as its job waits.
 		if s := c.byName[r.ScaleSet]; s != nil && r.started && !r.busy {
 			retryAt := c.backOff(s)
 			c.log.Warn("the runner exited without running a job", "unit", unit, "scale_set", r.ScaleSet, "retry_at", retryAt)
@@ -297,8 +287,8 @@ func (c *Controller) release(ctx context.Context, unit string, failed bool) {
 	c.signal()
 }
 
-// backOff counts a failure against a scale set and holds its next start
-// back. It is called with c.mu held.
+// backOff records a failure for s and delays its next start. Call with c.mu
+// held.
 func (c *Controller) backOff(s *scaleSet) time.Time {
 	s.failures++
 	s.retryAt = c.now().Add(backoff(startRetry, startRetryUp, s.failures))
@@ -308,14 +298,14 @@ func (c *Controller) backOff(s *scaleSet) time.Time {
 const (
 	removalRetry   = time.Minute
 	removalRetryUp = 15 * time.Minute
-	// removalGiveUp is how long a registration is retried. GitHub removes
-	// an ephemeral runner that has been offline for a day by itself.
+	// removalGiveUp: GitHub itself removes an ephemeral runner offline for a
+	// day.
 	removalGiveUp = 24 * time.Hour
 )
 
-// removeRegistrations removes the registrations of runners whose units have
-// gone. An ephemeral runner removes its own after its job, so most of these
-// find nothing to do.
+// removeRegistrations retries the queued registration removals that are due.
+// An ephemeral runner deregisters itself after its job, so most find nothing
+// to remove.
 func (c *Controller) removeRegistrations(ctx context.Context) {
 	c.mu.Lock()
 	now := c.now()
@@ -375,15 +365,13 @@ func (c *Controller) schedule(ctx context.Context) {
 	}
 }
 
-// plan reserves the runners to start now, in order, and returns them. It is
-// called with c.mu held.
+// plan reserves the runners to start now and returns them. Call with c.mu
+// held.
 //
-// The budget is counted from the memory each pool declares, for every unit
-// started and not yet exited, never from what the units use. While it is
-// full, the next free memory goes to the scale set whose oldest waiting job
-// has waited longest. That scale set is held back rather than passed over
-// when it doesn't fit, even if another one would, so a pool with large
-// runners can't be starved by pools with small ones.
+// The budget counts each live unit at its pool's declared memory, never its
+// usage. The scale set whose oldest uncovered job has waited longest goes
+// first; if it doesn't fit, nothing else starts in its place, so pools of
+// large runners can't be starved by small ones.
 func (c *Controller) plan() []*runner {
 	now := c.now()
 	var used int64
@@ -469,9 +457,9 @@ func (c *Controller) plan() []*runner {
 
 // priority orders the scale sets that need a runner.
 type priority struct {
-	// waiting is a job waiting, rather than only min_runners being short.
+	// waiting: a job is waiting, not just a min_runners shortfall.
 	waiting bool
-	// since is when the waiting job was queued, or when the shortfall began.
+	// since: the waiting job's queue time, or when the shortfall began.
 	since time.Time
 	index int
 }
@@ -533,7 +521,7 @@ func slotOf(p *config.Pool, unit string) (int, bool) {
 	return slot, true
 }
 
-// runnerName is unique per start, so a slot can be reused while its last
+// runnerName is unique per start, so a slot can be reused while its previous
 // runner's registration is still being removed.
 func (c *Controller) runnerName(pool string, slot int) string {
 	return fmt.Sprintf("%s-%s-%d-%s", c.owner, pool, slot, c.suffix())
@@ -551,8 +539,7 @@ const (
 )
 
 // start registers a reserved runner, writes its JIT config file and starts
-// its unit. If any step fails, the runner is released and its scale set
-// waits before it is tried again.
+// its unit. On failure the runner is released and its scale set backs off.
 func (c *Controller) start(ctx context.Context, r *runner) {
 	s := c.byName[r.ScaleSet]
 	pool := c.pools[r.Pool]
@@ -569,17 +556,16 @@ func (c *Controller) start(ctx context.Context, r *runner) {
 	c.mu.Unlock()
 	c.save()
 
-	// Once registered, the start is finished even if the controller is
-	// stopping, so a unit systemd is already starting isn't cleaned up
-	// under it. systemd's own start timeout bounds the wait.
+	// Once registered, finish the start even if the controller is stopping,
+	// rather than cleaning up under a unit systemd may be starting.
 	ctx = context.WithoutCancel(ctx)
 	if err := writeJITFile(pool.JITConfigDir, r.Slot, jit.Encoded); err != nil {
 		c.abort(ctx, r, s, false, fmt.Errorf("writing the JIT config file: %w", err))
 		return
 	}
 	if err := c.sd.Start(ctx, r.unit); err != nil {
-		// systemctl can fail with the unit up, for one when it times out
-		// waiting. A running unit is kept, or it would run untracked.
+		// systemctl can fail (a timeout, say) with the unit up anyway; keep
+		// it rather than let it run untracked.
 		states, serr := c.sd.ActiveStates(ctx, []string{r.unit})
 		if state := states[r.unit]; serr != nil || state == "" || systemd.Exited(state) {
 			c.abort(ctx, r, s, true, fmt.Errorf("starting the unit: %w", err))
@@ -596,8 +582,8 @@ func (c *Controller) start(ctx context.Context, r *runner) {
 	c.signal()
 }
 
-// abort releases a runner whose start failed. unitFailed is set when
-// systemd was asked to start the unit, so it may need resetting.
+// abort releases a runner whose start failed. unitFailed means systemd was
+// asked to start it, so the unit may need resetting.
 func (c *Controller) abort(ctx context.Context, r *runner, s *scaleSet, unitFailed bool, err error) {
 	c.mu.Lock()
 	retryAt := c.backOff(s)
@@ -615,10 +601,10 @@ func backoff(first, most time.Duration, attempts int) time.Duration {
 	return min(d, most)
 }
 
-// save writes the record of runners and removals. It is called without
-// c.mu, so the disk's latency never holds up the sessions. A failure is
-// logged rather than returned: the controller carries on, and a restart
-// cleans up from the units systemd still knows about.
+// save writes the state file. Call without c.mu: it takes the lock only to
+// snapshot, so disk latency never holds up the sessions, and a stale
+// snapshot never overwrites a newer one. Failures are only logged; recover
+// works from systemd as well as the file.
 func (c *Controller) save() {
 	c.mu.Lock()
 	c.seq++
@@ -656,8 +642,8 @@ func sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
-// maxCapacity is the most runners a scale set could have at once, which
-// GitHub uses to avoid assigning it more jobs than it can take.
+// maxCapacity is the most runners s could have at once, reported to GitHub
+// so it doesn't assign more jobs than that.
 func (c *Controller) maxCapacity(s *scaleSet) int {
 	if s.pool.MaxRunners > 0 {
 		return s.pool.MaxRunners

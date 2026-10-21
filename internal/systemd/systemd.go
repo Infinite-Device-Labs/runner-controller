@@ -1,5 +1,4 @@
-// Package systemd starts and watches the units the controller runs runners
-// in, through systemctl.
+// Package systemd starts, stops and watches runner units through systemctl.
 package systemd
 
 import (
@@ -13,40 +12,36 @@ import (
 )
 
 const (
-	// startTimeout bounds a start, which can include pulling an image.
-	// systemd's own TimeoutStartSec usually ends it first.
+	// startTimeout bounds a start, which may include an image pull;
+	// TimeoutStartSec usually ends it first.
 	startTimeout = 15 * time.Minute
-	// queryTimeout bounds every other call, so a wedged systemd can't hold
-	// the controller, or its shutdown, for ever.
+	// queryTimeout bounds every other call, so a wedged systemd can't hang
+	// the controller or its shutdown.
 	queryTimeout = time.Minute
 )
 
 // Manager is what the controller asks of systemd.
 type Manager interface {
-	// Start starts a unit and returns once systemd has, or once the start
-	// has failed.
+	// Start starts a unit and waits for the start job to finish.
 	Start(ctx context.Context, unit string) error
-	// Stop asks systemd to stop a unit and returns without waiting for it
-	// to have stopped.
+	// Stop queues a stop without waiting for it.
 	Stop(ctx context.Context, unit string) error
-	// ActiveStates returns each unit's ActiveState: "active", "inactive",
-	// "failed", "activating" and so on. A unit systemd hasn't loaded is
+	// ActiveStates returns each unit's ActiveState; an unloaded unit is
 	// "inactive".
 	ActiveStates(ctx context.Context, units []string) (map[string]string, error)
-	// List returns the loaded units that match a glob such as
+	// List returns the loaded units matching a glob such as
 	// "ci-runner@*.service", with their ActiveState.
 	List(ctx context.Context, pattern string) (map[string]string, error)
 	// ResetFailed clears a failed unit's state.
 	ResetFailed(ctx context.Context, unit string) error
 }
 
-// Exited reports whether an ActiveState is one a unit is left in once it
-// has stopped.
+// Exited reports whether state is one a stopped unit is left in.
 func Exited(state string) bool {
 	return state == "inactive" || state == "failed"
 }
 
-// Systemctl is a Manager that runs systemctl against the system manager.
+// Systemctl is a Manager for the system instance, via systemctl.
 type Systemctl struct{}
 
 func (Systemctl) Start(ctx context.Context, unit string) error {
@@ -96,8 +91,8 @@ func systemctl(ctx context.Context, timeout time.Duration, args ...string) ([]by
 	return out, nil
 }
 
-// parseShow reads `systemctl show --property=Id,ActiveState` for several
-// units: one block of properties per unit, separated by blank lines.
+// parseShow parses `systemctl show --property=Id,ActiveState` for several
+// units: blank-line-separated blocks.
 func parseShow(out []byte) (map[string]string, error) {
 	states := map[string]string{}
 	var id, state string
@@ -126,8 +121,8 @@ func parseShow(out []byte) (map[string]string, error) {
 	return states, sc.Err()
 }
 
-// parseList reads `systemctl list-units --plain --no-legend`: a unit per
-// line, as UNIT LOAD ACTIVE SUB DESCRIPTION.
+// parseList parses `systemctl list-units --plain --no-legend`: UNIT LOAD
+// ACTIVE SUB DESCRIPTION per line.
 func parseList(out []byte) map[string]string {
 	units := map[string]string{}
 	for line := range strings.Lines(string(out)) {

@@ -52,7 +52,7 @@ func TestOnlyTheSurplusIsStopped(t *testing.T) {
 	h.jobStarts("a", 3, 1)
 
 	// Two jobs are cancelled: one job and min_runners need two runners.
-	// The busy one stays, and one idle one is stopped.
+	// The busy one stays, and two idle ones are stopped.
 	h.now = h.at(idleGrace)
 	h.demand("a", 1, 1)
 	h.step()

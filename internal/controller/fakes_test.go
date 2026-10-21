@@ -17,7 +17,7 @@ import (
 	"github.com/Infinite-Device-Labs/runner-controller/internal/config"
 )
 
-// fakeClient is a scale set API that registers every runner it is asked to.
+// fakeClient is a scale set API that registers runners unless told to fail.
 type fakeClient struct {
 	mu        sync.Mutex
 	id        int
@@ -141,7 +141,7 @@ func (f *fakeSession) Close(ctx context.Context) error {
 }
 
 // fakeSystemd keeps each unit's ActiveState. A started unit is active until
-// a test stops it.
+// the test or Stop changes it.
 type fakeSystemd struct {
 	mu       sync.Mutex
 	states   map[string]string
