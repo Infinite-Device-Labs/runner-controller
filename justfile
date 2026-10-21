@@ -17,6 +17,10 @@ default:
 build:
     CGO_ENABLED=0 go build -trimpath -o dist/runner-controller ./cmd/runner-controller
 
+[doc("Check a configuration file, its keys and its directories")]
+check-config path:
+    go run ./cmd/runner-controller -check -config {{ path }}
+
 [doc("Compile every package")]
 check:
     go build -o /dev/null ./...
