@@ -1,11 +1,18 @@
 package actions
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
 	"slices"
 	"strings"
+	"time"
+
+	"github.com/hashicorp/go-retryablehttp"
 
 	"github.com/Infinite-Device-Labs/runner-controller/internal/scaleset"
 )
@@ -20,8 +27,9 @@ type AppCredentials struct {
 }
 
 // New returns a Client for the scale sets registered at url, an organisation
-// or a repository such as https://github.com/example-org.
-func New(url string, app AppCredentials, version string) (Client, error) {
+// or a repository such as https://github.com/example-org. At debug level, log
+// also gets each message's raw body.
+func New(url string, app AppCredentials, version string, log *slog.Logger) (Client, error) {
 	c, err := scaleset.NewClientWithGitHubApp(scaleset.ClientWithGitHubAppConfig{
 		GitHubConfigURL: url,
 		GitHubAppAuth: scaleset.GitHubAppAuth{
@@ -34,7 +42,7 @@ func New(url string, app AppCredentials, version string) (Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating the scale set client for %s: %w", url, err)
 	}
-	return &client{c: c, version: version}, nil
+	return &client{c: c, version: version, log: log}, nil
 }
 
 func systemInfo(version string, scaleSetID int) scaleset.SystemInfo {
@@ -49,6 +57,7 @@ func systemInfo(version string, scaleSetID int) scaleset.SystemInfo {
 type client struct {
 	c       *scaleset.Client
 	version string
+	log     *slog.Logger
 }
 
 func (c *client) EnsureScaleSet(ctx context.Context, spec ScaleSetSpec) (int, Change, error) {
@@ -118,7 +127,14 @@ func sameLabels(a, b []scaleset.Label) bool {
 }
 
 func (c *client) OpenSession(ctx context.Context, scaleSetID int, owner string) (Session, error) {
-	s, err := c.c.MessageSessionClient(ctx, scaleSetID, owner)
+	var opts []scaleset.HTTPOption
+	if c.log != nil && c.log.Enabled(ctx, slog.LevelDebug) {
+		rc := retryablehttp.NewClient()
+		rc.RetryMax, rc.RetryWaitMax = 4, 30*time.Second // the library's defaults
+		rc.ResponseLogHook = logMessageBodies(c.log, scaleSetID)
+		opts = append(opts, scaleset.WithRetryableHTTPClint(rc))
+	}
+	s, err := c.c.MessageSessionClient(ctx, scaleSetID, owner, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -219,6 +235,31 @@ func (s *session) AcquireJobs(ctx context.Context, requestIDs []int64) error {
 
 func (s *session) Close(ctx context.Context) error {
 	return s.s.Close(ctx)
+}
+
+// rawBodyMax caps a logged message body; a message holds at most 50 events.
+const rawBodyMax = 64 << 10
+
+// logMessageBodies logs the body of each message poll, so the payload's
+// actual field names are on record (#12). Only a GET's 200 is logged: the
+// session's other calls return its access token.
+func logMessageBodies(log *slog.Logger, scaleSetID int) retryablehttp.ResponseLogHook {
+	return func(_ retryablehttp.Logger, resp *http.Response) {
+		if resp.Request == nil || resp.Request.Method != http.MethodGet || resp.StatusCode != http.StatusOK {
+			return
+		}
+		b, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(b))
+		if err != nil {
+			return
+		}
+		body := string(b)
+		if len(body) > rawBodyMax {
+			body = body[:rawBodyMax] + "…(truncated)"
+		}
+		log.Debug("raw message", "scale_set_id", scaleSetID, "bytes", len(b), "body", body)
+	}
 }
 
 // withholdJITConfig keeps runner credentials out of errors. On a decode

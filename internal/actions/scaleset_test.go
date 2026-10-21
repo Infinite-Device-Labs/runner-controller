@@ -1,6 +1,7 @@
 package actions
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -11,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -185,7 +187,12 @@ var appKey = sync.OnceValue(func() string {
 
 func (f *fakeGitHub) client(t *testing.T) Client {
 	t.Helper()
-	c, err := New(f.srv.URL+"/example-org", AppCredentials{ID: "123", InstallationID: 7, PrivateKey: appKey()}, "test")
+	return f.clientLogging(t, nil)
+}
+
+func (f *fakeGitHub) clientLogging(t *testing.T, log *slog.Logger) Client {
+	t.Helper()
+	c, err := New(f.srv.URL+"/example-org", AppCredentials{ID: "123", InstallationID: 7, PrivateKey: appKey()}, "test", log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,5 +446,43 @@ func TestAcquirableJobs(t *testing.T) {
 	want := []Job{{RequestID: 7, QueueTime: queued}, {RequestID: 8, QueueTime: queued.Add(time.Minute)}}
 	if fmt.Sprint(jobs) != fmt.Sprint(want) {
 		t.Errorf("got %+v, want %+v", jobs, want)
+	}
+}
+
+func TestDebugLogsRawMessagesButNotTheSessionToken(t *testing.T) {
+	f := newFakeGitHub(t)
+	var out bytes.Buffer
+	c := f.clientLogging(t, slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	ctx := context.Background()
+
+	raw, _ := json.Marshal(map[string]any{
+		"messageId": 3, "messageType": "RunnerScaleSetJobMessages", "statistics": map[string]any{},
+		"body": `[{"messageType":"JobStarted","runnerName":"r1"}]`,
+	})
+	msg := string(raw)
+	f.messages = []*string{&msg}
+	sess, err := c.OpenSession(ctx, 42, "host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := sess.GetMessage(ctx, 0, 1)
+	if err != nil || got == nil || len(got.Started) != 1 || got.Started[0].RunnerName != "r1" {
+		t.Fatalf("the message didn't survive being logged: %+v, %v", got, err)
+	}
+	if !strings.Contains(out.String(), `msg="raw message" scale_set_id=42`) || !strings.Contains(out.String(), "JobStarted") {
+		t.Errorf("no raw message logged:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "queue-token") {
+		t.Errorf("the session's access token was logged:\n%s", out.String())
+	}
+
+	// Not at info level.
+	out.Reset()
+	c = f.clientLogging(t, slog.New(slog.NewTextHandler(&out, nil)))
+	f.messages = []*string{&msg}
+	sess, _ = c.OpenSession(ctx, 42, "host")
+	sess.GetMessage(ctx, 0, 1)
+	if strings.Contains(out.String(), "raw message") {
+		t.Errorf("raw message logged at info level:\n%s", out.String())
 	}
 }
