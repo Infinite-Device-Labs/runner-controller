@@ -24,8 +24,8 @@ the public overview. Keep both in step.
 - **The memory budget is counted from declared limits, never from usage.**
   The slice's `MemoryMax` is the backstop, not the plan.
 - **actions/scaleset is in public preview**, and its interfaces may change.
-  Keep it behind one small internal interface, so a change touches one
-  package.
+  Keep it behind one small internal interface, `internal/actions`, so a
+  change touches one package.
 
 Use `just` for every command in this repo, never the underlying tool. Run
 `just` with no arguments to list the recipes; each has a one-line

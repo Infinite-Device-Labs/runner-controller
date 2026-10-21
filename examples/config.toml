@@ -1,0 +1,49 @@
+# An example /etc/runner-controller/config.toml. Every name here is a
+# placeholder.
+
+# The most memory the started units may declare between them. Give their
+# slice the same MemoryMax (see runner.slice).
+memory_budget = "48G"
+
+# Where the controller records the runners it started. This is the default.
+# state_dir = "/var/lib/runner-controller"
+
+# A pool is a systemd template unit, one instance per runner. The controller
+# writes <jit_config_dir>/<slot>.env and starts <unit>@<slot>.service.
+[pools.small]
+unit = "ci-runner"
+jit_config_dir = "/run/runner-controller/small"
+# The MemoryMax the unit sets. This, not what the unit uses, is what each
+# runner counts against memory_budget.
+memory = "4G"
+# Keep two runners started ahead of demand. Only for a pool one scale set
+# uses.
+min_runners = 2
+
+[pools.large]
+unit = "ci-runner-large"
+jit_config_dir = "/run/runner-controller/large"
+memory = "16G"
+max_runners = 2
+
+[[scale_sets]]
+name = "example-linux"
+url = "https://github.com/example-org"
+labels = ["example-linux"]
+pool = "small"
+
+[scale_sets.github_app]
+id = 123456
+installation_id = 7890123
+private_key_path = "/etc/runner-controller/example-org.pem"
+
+[[scale_sets]]
+name = "example-linux-large"
+url = "https://github.com/example-org/example-repo"
+runner_group = "default"
+pool = "large"
+
+[scale_sets.github_app]
+id = "Iv23liEXAMPLE"
+installation_id = 7890124
+private_key_path = "/etc/runner-controller/example-repo.pem"

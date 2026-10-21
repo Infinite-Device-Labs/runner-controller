@@ -1,0 +1,7 @@
+# Every runner unit runs in this slice. Its MemoryMax is the controller's
+# memory_budget, so a miscount ends in a killed job, not a starved host.
+[Unit]
+Description=Ephemeral GitHub Actions runners
+
+[Slice]
+MemoryMax=48G

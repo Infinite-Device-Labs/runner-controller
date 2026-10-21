@@ -17,6 +17,23 @@ default:
 build:
     CGO_ENABLED=0 go build -trimpath -o dist/runner-controller ./cmd/runner-controller
 
+# What the release workflow publishes: a static binary, and a SHA256SUMS an
+# installer can pin it by.
+[doc("Static linux/amd64 release binary and its SHA256SUMS, into dist/")]
+release-build version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf dist && mkdir -p dist
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+        -ldflags "-s -w -X main.version={{ version }}" \
+        -o dist/runner-controller-linux-amd64 ./cmd/runner-controller
+    cd dist && sha256sum runner-controller-linux-amd64 > SHA256SUMS
+    cat SHA256SUMS
+
+[doc("Check a configuration file, its keys and its directories")]
+check-config path:
+    go run ./cmd/runner-controller -check -config {{ path }}
+
 [doc("Compile every package")]
 check:
     go build -o /dev/null ./...

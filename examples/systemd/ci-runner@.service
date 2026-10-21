@@ -1,0 +1,27 @@
+# A sketch of a pool's template unit, as the "small" pool in
+# ../config.toml starts it: ci-runner@<slot>.service. The unit owns the
+# job's isolation, so harden it for your site: the network, a firewall, the
+# user namespace, a seccomp profile. This one only shows what the
+# controller relies on.
+[Unit]
+Description=Ephemeral GitHub Actions runner, slot %i
+
+[Service]
+Slice=runner.slice
+# What the pool declares as its memory, and counts against the budget.
+MemoryMax=4G
+# The runner runs one job, then exits, and the unit with it.
+Type=notify
+# conmon, not podman, says the container is up, so it must be allowed to.
+# The job can't reach the notify socket: podman doesn't pass it into the
+# container with --sdnotify=conmon.
+NotifyAccess=all
+Delegate=yes
+KillMode=mixed
+# The controller removes the file once the unit has exited.
+ExecStart=/usr/bin/podman run --rm --replace --name=ci-runner-%i \
+    --cgroups=split --sdnotify=conmon \
+    --env-file=/run/runner-controller/small/%i.env \
+    ghcr.io/actions/actions-runner:latest /home/runner/run.sh
+# Pin the image to a runner version you keep current: the controller
+# registers runners with self-update off, so the image decides the version.
