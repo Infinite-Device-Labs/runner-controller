@@ -214,7 +214,7 @@ func (s *session) GetMessage(ctx context.Context, lastMessageID, maxCapacity int
 }
 
 func job(b scaleset.JobMessageBase, runner string) Job {
-	return Job{RequestID: b.RunnerRequestID, QueueTime: b.QueueTime, RunnerName: runner}
+	return Job{JobID: b.JobID, RequestID: b.RunnerRequestID, QueueTime: b.QueueTime, AssignTime: b.ScaleSetAssignTime, RunnerName: runner}
 }
 
 func statistics(s *scaleset.RunnerScaleSetStatistic) Statistics {

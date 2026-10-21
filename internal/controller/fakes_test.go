@@ -358,7 +358,8 @@ func (h *harness) demand(name string, assigned, running int, queued ...time.Time
 	msg := &actions.Message{}
 	for _, t := range queued {
 		h.jobID++
-		msg.Assigned = append(msg.Assigned, actions.Job{RequestID: h.jobID, QueueTime: t})
+		// As GitHub sends them: a job ID and an assign time, no request ID.
+		msg.Assigned = append(msg.Assigned, actions.Job{JobID: fmt.Sprintf("job-%d", h.jobID), AssignTime: t})
 	}
 	h.c.observe(s, actions.Statistics{AssignedJobs: assigned, RunningJobs: running}, msg)
 }
@@ -368,9 +369,9 @@ func (h *harness) demand(name string, assigned, running int, queued ...time.Time
 func (h *harness) jobStarts(name string, assigned, running int) {
 	h.t.Helper()
 	s := h.c.byName[name]
-	var job int64
+	var job string
 	for id, t := range s.pending {
-		if job == 0 || t.Before(s.pending[job]) {
+		if job == "" || t.Before(s.pending[job]) {
 			job = id
 		}
 	}
@@ -380,11 +381,11 @@ func (h *harness) jobStarts(name string, assigned, running int) {
 			idle = r
 		}
 	}
-	if job == 0 || idle == nil {
+	if job == "" || idle == nil {
 		h.t.Fatalf("scale set %q has no waiting job or no idle runner", name)
 	}
 	h.c.observe(s, actions.Statistics{AssignedJobs: assigned, RunningJobs: running}, &actions.Message{
-		Started: []actions.Job{{RequestID: job, RunnerName: idle.Name}},
+		Started: []actions.Job{{JobID: job, RunnerName: idle.Name}},
 	})
 }
 

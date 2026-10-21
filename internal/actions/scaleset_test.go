@@ -486,3 +486,51 @@ func TestDebugLogsRawMessagesButNotTheSessionToken(t *testing.T) {
 		t.Errorf("raw message logged at info level:\n%s", out.String())
 	}
 }
+
+// assignedAsGitHubSendsIt is a JobAssigned message as a real scale set
+// received it, with names replaced: no runnerRequestId or queueTime to speak
+// of, but a jobId and a scaleSetAssignTime (#12).
+const assignedAsGitHubSendsIt = `{"messageId":100000041,"messageType":"RunnerScaleSetJobMessages","statistics":{"totalAssignedJobs":1,"totalRunningJobs":0,"totalRegisteredRunners":0,"totalBusyRunners":0,"totalIdleRunners":0,"totalAvailableJobs":0,"totalAcquiredJobs":0},"body":"[{\"messageType\":\"JobAssigned\",\"repositoryName\":\"example-repo\",\"ownerName\":\"example-org\",\"jobWorkflowRef\":\"example-org/example-repo/.github/workflows/ci.yml@refs/heads/main\",\"requestLabels\":[\"example-linux\"],\"scaleSetAssignTime\":\"2026-10-21T15:38:29.179690906Z\",\"jobId\":\"0b6f1c2e-6a1d-5c3e-9f4a-2d7e8b1c3a5f\",\"runnerAssignTime\":\"0001-01-01T00:00:00Z\",\"finishTime\":\"0001-01-01T00:00:00Z\",\"jobDisplayName\":\"build\",\"workflowRunId\":1234567890,\"eventName\":\"workflow_dispatch\",\"queueTime\":\"0001-01-01T00:00:00Z\",\"runnerRequestId\":0}]"}`
+
+func TestAnAssignedEventAsGitHubSendsIt(t *testing.T) {
+	f := newFakeGitHub(t)
+	msg := assignedAsGitHubSendsIt
+	f.messages = []*string{&msg}
+	sess, err := f.client(t).OpenSession(context.Background(), 42, "host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := sess.GetMessage(context.Background(), 0, 1)
+	if err != nil || got == nil || len(got.Assigned) != 1 {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	j := got.Assigned[0]
+	assigned := time.Date(2026, 10, 21, 15, 38, 29, 179690906, time.UTC)
+	if j.JobID != "0b6f1c2e-6a1d-5c3e-9f4a-2d7e8b1c3a5f" || !j.AssignTime.Equal(assigned) || j.RequestID != 0 || !j.QueueTime.IsZero() {
+		t.Errorf("job %+v", j)
+	}
+	if j.Key() != j.JobID || !j.Since().Equal(assigned) {
+		t.Errorf("key %q since %v, want the job ID and the assign time", j.Key(), j.Since())
+	}
+	if got.Statistics.AssignedJobs != 1 {
+		t.Errorf("statistics %+v", got.Statistics)
+	}
+}
+
+func TestJobKeyAndSince(t *testing.T) {
+	queued := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	assigned := queued.Add(time.Second)
+	for _, tc := range []struct {
+		job   Job
+		key   string
+		since time.Time
+	}{
+		{Job{JobID: "u", RequestID: 7, QueueTime: queued, AssignTime: assigned}, "u", queued},
+		{Job{RequestID: 7, AssignTime: assigned}, "request-7", assigned},
+		{Job{}, "", time.Time{}},
+	} {
+		if k, s := tc.job.Key(), tc.job.Since(); k != tc.key || !s.Equal(tc.since) {
+			t.Errorf("%+v: key %q since %v, want %q %v", tc.job, k, s, tc.key, tc.since)
+		}
+	}
+}

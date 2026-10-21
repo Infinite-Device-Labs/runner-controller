@@ -81,10 +81,11 @@ type scaleSet struct {
 	// running) and running.
 	assigned int
 	running  int
-	// pending maps assigned, not yet started jobs to their queue times.
+	// pending maps assigned, not yet started jobs (by Job.Key) to when each
+	// started waiting.
 	// Messages carry at most 50 events, so it can miss jobs: it only orders
 	// scale sets, while assigned decides how many runners.
-	pending map[int64]time.Time
+	pending map[string]time.Time
 	// demandSince is when the scale set last started needing a runner.
 	demandSince time.Time
 	// failures counts consecutive runners that failed to start or exited
@@ -153,7 +154,7 @@ func New(cfg *config.Config, clients map[string]actions.Client, sd systemd.Manag
 		if client == nil {
 			return nil, fmt.Errorf("no client for scale set %q", s.Name)
 		}
-		set := &scaleSet{cfg: s, pool: cfg.Pools[s.Pool], client: client, index: i, pending: map[int64]time.Time{}}
+		set := &scaleSet{cfg: s, pool: cfg.Pools[s.Pool], client: client, index: i, pending: map[string]time.Time{}}
 		c.sets = append(c.sets, set)
 		c.byName[s.Name] = set
 	}
