@@ -26,6 +26,9 @@ type Manager interface {
 	// Start starts a unit and returns once systemd has, or once the start
 	// has failed.
 	Start(ctx context.Context, unit string) error
+	// Stop asks systemd to stop a unit and returns without waiting for it
+	// to have stopped.
+	Stop(ctx context.Context, unit string) error
 	// ActiveStates returns each unit's ActiveState: "active", "inactive",
 	// "failed", "activating" and so on. A unit systemd hasn't loaded is
 	// "inactive".
@@ -48,6 +51,11 @@ type Systemctl struct{}
 
 func (Systemctl) Start(ctx context.Context, unit string) error {
 	_, err := systemctl(ctx, startTimeout, "start", "--", unit)
+	return err
+}
+
+func (Systemctl) Stop(ctx context.Context, unit string) error {
+	_, err := systemctl(ctx, queryTimeout, "stop", "--no-block", "--", unit)
 	return err
 }
 

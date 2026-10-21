@@ -79,7 +79,7 @@ func (c *Controller) recoverLocked(ctx context.Context) error {
 			if known && c.byName[rec.ScaleSet] != nil {
 				// Whether its job has started isn't known; counting it busy
 				// only means its scale set's waiting jobs look older.
-				c.runners[unit] = &runner{record: rec, unit: unit, started: true, busy: true}
+				c.runners[unit] = &runner{record: rec, unit: unit, started: true, startedAt: c.now(), busy: true, adopted: true}
 				c.log.Info("adopted a running unit", "unit", unit, "scale_set", rec.ScaleSet, "runner", rec.Name)
 				continue
 			}
