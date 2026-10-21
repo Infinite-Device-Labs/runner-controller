@@ -47,7 +47,7 @@ func TestSessionAcknowledgesAcquiresAndRecords(t *testing.T) {
 	if s.assigned != 2 {
 		t.Errorf("assigned %d, want 2", s.assigned)
 	}
-	if len(s.pending) != 1 || !s.pending[1].Equal(queued) {
+	if len(s.pending) != 1 || !s.pending["request-1"].Equal(queued) {
 		t.Errorf("pending %v, want job 1 queued at %v", s.pending, queued)
 	}
 }
@@ -147,7 +147,7 @@ func TestASessionAcquiresJobsOfferedWhileNoneWasOpen(t *testing.T) {
 
 	h.c.session(context.Background(), h.c.byName["a"])
 	equal(t, "acquired", sess.acquired, []int64{7})
-	if got := h.c.byName["a"].pending[7]; !got.Equal(queued) {
+	if got := h.c.byName["a"].pending["request-7"]; !got.Equal(queued) {
 		t.Errorf("job 7 pending since %v, want %v", got, queued)
 	}
 }
@@ -192,7 +192,7 @@ func TestDebugLoggingShowsJobEventsAndAcquirableListings(t *testing.T) {
 	for _, want := range []string{
 		`msg="listed acquirable jobs" scale_set=a jobs=0`,
 		`msg=message scale_set=a id=4 available_jobs=0 assigned_jobs=1 running_jobs=1`,
-		`msg="job event" scale_set=a event=started request_id=9 runner=host-p-0-ab`,
+		`msg="job event" scale_set=a event=started job_id="" request_id=9 runner=host-p-0-ab`,
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("no %q in\n%s", want, out.String())
@@ -225,4 +225,20 @@ func TestJobsWithoutARequestIDDontCollapse(t *testing.T) {
 	h.clients["a"].session = sess
 	h.c.session(context.Background(), s)
 	equal(t, "acquired", sess.acquired, nil)
+}
+
+func TestJobsAreTrackedByJobID(t *testing.T) {
+	h := newHarness(t, "10G", map[string]*config.Pool{"p": pool("ci-runner", "2G", 0, 0)}, set("a", "p"))
+	s := h.c.byName["a"]
+	// Two jobs as GitHub sends them: no request IDs, distinct job IDs.
+	h.c.observe(s, actions.Statistics{AssignedJobs: 2}, &actions.Message{Assigned: []actions.Job{
+		{JobID: "u1", AssignTime: h.at(0)}, {JobID: "u2", AssignTime: h.at(time.Minute)},
+	}})
+	if len(s.pending) != 2 || !s.pending["u1"].Equal(h.at(0)) || !s.pending["u2"].Equal(h.at(time.Minute)) {
+		t.Fatalf("pending %v", s.pending)
+	}
+	h.c.observe(s, actions.Statistics{AssignedJobs: 2, RunningJobs: 1}, &actions.Message{Started: []actions.Job{{JobID: "u1"}}})
+	if _, ok := s.pending["u1"]; ok || len(s.pending) != 1 {
+		t.Errorf("pending %v after u1 started, want only u2", s.pending)
+	}
 }

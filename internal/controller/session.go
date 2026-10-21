@@ -143,23 +143,23 @@ func (c *Controller) observe(s *scaleSet, st actions.Statistics, msg *actions.Me
 		c.logEvents(s, msg)
 		for _, jobs := range [][]actions.Job{msg.Available, msg.Assigned} {
 			for _, j := range jobs {
-				// A zero ID would collapse every job into one entry (#12).
-				if _, ok := s.pending[j.RequestID]; ok || j.RequestID == 0 {
+				key := j.Key()
+				if _, ok := s.pending[key]; ok || key == "" {
 					continue
 				}
-				t := j.QueueTime
+				t := j.Since()
 				if t.IsZero() {
 					t = now
 				}
-				s.pending[j.RequestID] = t
+				s.pending[key] = t
 			}
 		}
 		for _, j := range msg.Started {
-			delete(s.pending, j.RequestID)
+			delete(s.pending, j.Key())
 			c.ranJob(j.RunnerName, false)
 		}
 		for _, j := range msg.Completed {
-			delete(s.pending, j.RequestID)
+			delete(s.pending, j.Key())
 			c.ranJob(j.RunnerName, true)
 		}
 	}
@@ -190,8 +190,8 @@ func (c *Controller) logEvents(s *scaleSet, msg *actions.Message) {
 		jobs []actions.Job
 	}{{"available", msg.Available}, {"assigned", msg.Assigned}, {"started", msg.Started}, {"completed", msg.Completed}} {
 		for _, j := range e.jobs {
-			c.log.Debug("job event", "scale_set", s.cfg.Name, "event", e.kind, "request_id", j.RequestID,
-				"runner", j.RunnerName, "queued", j.QueueTime, "result", j.Result)
+			c.log.Debug("job event", "scale_set", s.cfg.Name, "event", e.kind, "job_id", j.JobID, "request_id", j.RequestID,
+				"runner", j.RunnerName, "queued", j.QueueTime, "assigned", j.AssignTime, "result", j.Result)
 		}
 	}
 }

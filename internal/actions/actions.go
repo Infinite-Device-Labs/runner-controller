@@ -8,6 +8,7 @@ package actions
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 )
 
@@ -100,12 +101,38 @@ type Message struct {
 
 // Job is one job event.
 type Job struct {
-	// RequestID identifies the job across events.
+	// JobID is GitHub's UUID for the job, set on every event. RequestID and
+	// QueueTime, by contrast, come as zero on assigned events (#12).
+	JobID string
+	// RequestID is what AcquireJobs takes.
 	RequestID int64
-	// QueueTime is when the job was queued.
+	// QueueTime is when the job was queued, when GitHub says.
 	QueueTime time.Time
+	// AssignTime is when GitHub assigned the job to the scale set.
+	AssignTime time.Time
 	// RunnerName is set on started and completed events.
 	RunnerName string
 	// Result is set on completed events: "succeeded", "canceled", ...
 	Result string
+}
+
+// Key identifies a job across its events: its JobID, else its RequestID, else
+// "" when GitHub sent neither.
+func (j Job) Key() string {
+	switch {
+	case j.JobID != "":
+		return j.JobID
+	case j.RequestID != 0:
+		return "request-" + strconv.FormatInt(j.RequestID, 10)
+	}
+	return ""
+}
+
+// Since is when the job started waiting: its queue time, else when it was
+// assigned to the scale set, else zero.
+func (j Job) Since() time.Time {
+	if !j.QueueTime.IsZero() {
+		return j.QueueTime
+	}
+	return j.AssignTime
 }
