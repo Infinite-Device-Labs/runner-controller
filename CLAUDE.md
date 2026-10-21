@@ -25,7 +25,9 @@ the public overview. Keep both in step.
   The slice's `MemoryMax` is the backstop, not the plan.
 - **actions/scaleset is in public preview**, and its interfaces may change.
   Keep it behind one small internal interface, `internal/actions`, so a
-  change touches one package.
+  change touches one package. `internal/scaleset` is a patched copy of
+  v0.4.0 that only `internal/actions` imports: never edit upstream's files
+  there, only the patch file, and keep its README's checksums current.
 
 Use `just` for every command in this repo, never the underlying tool. Run
 `just` with no arguments to list the recipes; each has a one-line

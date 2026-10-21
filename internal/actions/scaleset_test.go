@@ -42,6 +42,8 @@ type fakeGitHub struct {
 	// messages are served in turn; nil is an empty poll.
 	messages []*string
 	acquired []int64
+	// acquirable answers acquirablejobs; empty is a 204.
+	acquirable string
 }
 
 func newFakeGitHub(t *testing.T) *fakeGitHub {
@@ -135,6 +137,12 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		})
 	case r.Method == "DELETE" && strings.HasPrefix(path, sets+"/42/sessions/"):
 		w.WriteHeader(204)
+	case r.Method == "GET" && path == sets+"/42/acquirablejobs":
+		if f.acquirable == "" {
+			w.WriteHeader(204)
+			return
+		}
+		reply(200, f.acquirable)
 	case r.Method == "POST" && path == sets+"/42/acquirejobs":
 		var ids []int64
 		json.Unmarshal(body, &ids)
@@ -406,5 +414,30 @@ func TestWithholdJITConfig(t *testing.T) {
 		if got := withholdJITConfig(errors.New(msg)); strings.Contains(got.Error(), "secret") || strings.Contains(got.Error(), msg) {
 			t.Errorf("%q came through as %v", msg, got)
 		}
+	}
+}
+
+func TestAcquirableJobs(t *testing.T) {
+	f := newFakeGitHub(t)
+	c := f.client(t)
+	ctx := context.Background()
+
+	jobs, err := c.AcquirableJobs(ctx, 42)
+	if err != nil || len(jobs) != 0 {
+		t.Fatalf("none (204): %v, %v", jobs, err)
+	}
+
+	queued := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	f.acquirable = fmt.Sprintf(`{"count":2,"value":[
+		{"messageType":"JobAvailable","runnerRequestId":7,"queueTime":%q,"acquireJobUrl":"x"},
+		{"messageType":"JobAvailable","runnerRequestId":8,"queueTime":%q}]}`,
+		queued.Format(time.RFC3339), queued.Add(time.Minute).Format(time.RFC3339))
+	jobs, err = c.AcquirableJobs(ctx, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Job{{RequestID: 7, QueueTime: queued}, {RequestID: 8, QueueTime: queued.Add(time.Minute)}}
+	if fmt.Sprint(jobs) != fmt.Sprint(want) {
+		t.Errorf("got %+v, want %+v", jobs, want)
 	}
 }

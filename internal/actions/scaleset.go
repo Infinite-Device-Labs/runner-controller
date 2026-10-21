@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/actions/scaleset"
+	"github.com/Infinite-Device-Labs/runner-controller/internal/scaleset"
 )
 
 // AppCredentials are a GitHub App's, for one installation.
@@ -122,6 +122,18 @@ func (c *client) OpenSession(ctx context.Context, scaleSetID int, owner string) 
 	return &session{s: s}, nil
 }
 
+func (c *client) AcquirableJobs(ctx context.Context, scaleSetID int) ([]Job, error) {
+	jobs, err := c.c.GetAcquirableJobs(ctx, scaleSetID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Job, len(jobs))
+	for i, j := range jobs {
+		out[i] = job(j.JobMessageBase, "")
+	}
+	return out, nil
+}
+
 func (c *client) GenerateJITConfig(ctx context.Context, scaleSetID int, runnerName string) (*JITConfig, error) {
 	jit, err := c.c.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{Name: runnerName}, scaleSetID)
 	if err != nil {
@@ -190,7 +202,7 @@ func statistics(s *scaleset.RunnerScaleSetStatistic) Statistics {
 	if s == nil {
 		return Statistics{}
 	}
-	return Statistics{AssignedJobs: s.TotalAssignedJobs, RunningJobs: s.TotalRunningJobs}
+	return Statistics{AvailableJobs: s.TotalAvailableJobs, AssignedJobs: s.TotalAssignedJobs, RunningJobs: s.TotalRunningJobs}
 }
 
 func (s *session) DeleteMessage(ctx context.Context, messageID int) error {

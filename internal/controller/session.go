@@ -50,8 +50,13 @@ func (c *Controller) session(ctx context.Context, s *scaleSet) error {
 			c.log.Warn("couldn't close the message session", "scale_set", s.cfg.Name, "error", err)
 		}
 	}()
-	c.log.Info("message session open", "scale_set", s.cfg.Name)
-	c.observe(s, sess.Statistics(), nil)
+	st := sess.Statistics()
+	c.log.Info("message session open", "scale_set", s.cfg.Name, "available_jobs", st.AvailableJobs, "assigned_jobs", st.AssignedJobs)
+	c.observe(s, st, nil)
+	if err := c.acquireLeftovers(ctx, s, sess, st); err != nil {
+		c.log.Warn("couldn't acquire jobs offered while no session was open; they wait for the scale set's next message",
+			"scale_set", s.cfg.Name, "available_jobs", st.AvailableJobs, "error", err)
+	}
 
 	last := 0
 	for {
@@ -93,6 +98,29 @@ func (c *Controller) session(ctx context.Context, s *scaleSet) error {
 	}
 }
 
+// acquireLeftovers acquires jobs offered while no session was open. GitHub
+// offers them again only with the scale set's next message, which on a quiet
+// scale set can be hours away. The condition is actions-runner-controller's.
+func (c *Controller) acquireLeftovers(ctx context.Context, s *scaleSet, sess actions.Session, st actions.Statistics) error {
+	if st.AvailableJobs == 0 && st.AssignedJobs == 0 {
+		return nil
+	}
+	jobs, err := s.client.AcquirableJobs(ctx, s.id)
+	if err != nil || len(jobs) == 0 {
+		return err
+	}
+	ids := make([]int64, len(jobs))
+	for i, j := range jobs {
+		ids[i] = j.RequestID
+	}
+	if err := sess.AcquireJobs(ctx, ids); err != nil {
+		return err
+	}
+	c.log.Info("acquired jobs offered while no session was open", "scale_set", s.cfg.Name, "jobs", len(ids))
+	c.observe(s, st, &actions.Message{Available: jobs})
+	return nil
+}
+
 // observe records a scale set's statistics and a message's job events, and
 // wakes the loop to act on them.
 func (c *Controller) observe(s *scaleSet, st actions.Statistics, msg *actions.Message) {
@@ -123,7 +151,7 @@ func (c *Controller) observe(s *scaleSet, st actions.Statistics, msg *actions.Me
 	}
 	s.assigned = st.AssignedJobs
 	// Nothing waiting: anything still pending missed its started event.
-	if st.AssignedJobs <= st.RunningJobs {
+	if st.AssignedJobs <= st.RunningJobs && st.AvailableJobs == 0 {
 		clear(s.pending)
 	}
 	c.signal()
