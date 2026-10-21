@@ -15,8 +15,8 @@ import (
 	"github.com/Infinite-Device-Labs/runner-controller/internal/config"
 )
 
-// stateFile is the record, in the state directory, of the runners the
-// controller has started and the registrations it still has to remove.
+// stateFile, in the state directory, records started runners and pending
+// registration removals.
 const stateFile = "runners.json"
 
 type state struct {
@@ -24,20 +24,20 @@ type state struct {
 	Removals []*removal `json:"removals"`
 }
 
-// record is a runner the controller started, as it is kept across restarts.
+// record is a started runner as persisted across restarts.
 type record struct {
 	Pool       string `json:"pool"`
 	Slot       int    `json:"slot"`
 	ScaleSet   string `json:"scale_set"`
 	ScaleSetID int    `json:"scale_set_id"`
-	// Name is chosen before the runner is registered, so a registration
-	// whose ID never came back can still be found and removed.
+	// Name is chosen before registering, so a registration whose ID never
+	// came back can still be found and removed.
 	Name string `json:"name"`
-	// ID is the registration's, once GitHub has returned it.
+	// ID is set once GitHub returns it.
 	ID int64 `json:"id,omitempty"`
 }
 
-// removal is a registration still to be removed, once its unit has gone.
+// removal is a registration still to remove after its unit has gone.
 type removal struct {
 	ScaleSet string    `json:"scale_set"`
 	RunnerID int64     `json:"runner_id,omitempty"`
@@ -70,8 +70,7 @@ func saveState(dir string, st *state) error {
 	return writeFileAtomic(dir, stateFile, append(b, '\n'))
 }
 
-// writeFileAtomic writes dir/name, readable by its owner alone, so that a
-// reader sees the old file or the new one and never half of one.
+// writeFileAtomic writes dir/name with mode 0600 via a temp file and rename.
 func writeFileAtomic(dir, name string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -100,15 +99,14 @@ func writeFileAtomic(dir, name string, data []byte) error {
 	return err
 }
 
-// jitFileName is the file a slot's unit reads its runner's configuration
-// from.
 func jitFileName(slot int) string {
 	return strconv.Itoa(slot) + ".env"
 }
 
-// writeJITFile writes a slot's configuration as an environment file, which
-// both systemd's EnvironmentFile= and podman's --env-file read. The runner
-// takes ACTIONS_RUNNER_INPUT_JITCONFIG as its --jitconfig.
+// writeJITFile writes a slot's config as an env file, for systemd's
+// EnvironmentFile= or podman's --env-file. The runner reads
+// ACTIONS_RUNNER_INPUT_JITCONFIG as its --jitconfig and scrubs it from the
+// environment its jobs inherit.
 func writeJITFile(dir string, slot int, encoded string) error {
 	return writeFileAtomic(dir, jitFileName(slot), []byte("ACTIONS_RUNNER_INPUT_JITCONFIG="+encoded+"\n"))
 }
@@ -121,12 +119,11 @@ func removeJITFile(dir string, slot int) error {
 	return err
 }
 
-// jitFile matches a slot's configuration file and the temporary file it is
-// written through. Nothing else in the directory is touched.
+// jitFile matches a slot's file and its temp file; nothing else in the
+// directory is touched.
 var jitFile = regexp.MustCompile(`^\.?([0-9]+)\.env(\.tmp)?$`)
 
-// leftoverJITFiles lists the files in dir that belong to a slot inUse
-// reports free.
+// leftoverJITFiles lists dir's JIT files for slots inUse reports free.
 func leftoverJITFiles(dir string, inUse func(slot int) bool) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -150,12 +147,10 @@ func leftoverJITFiles(dir string, inUse func(slot int) bool) ([]string, error) {
 	return out, nil
 }
 
-// privateDir checks that dir is a directory, not a symbolic link, owned by
-// the controller's user and writable by no one else. Anyone who could write
-// to a pool's directory could swap a job's JIT config for their own, and
-// anyone who could write to the state directory could have the App remove
-// any runner. With create, a missing directory is made, readable by its
-// owner alone.
+// privateDir requires dir to be a real directory owned by the controller's
+// user and writable by no one else: write access to a JIT dir lets a user
+// swap in their own runner config, and to the state dir lets them have the
+// App remove any runner. With create, a missing dir is made 0700.
 func privateDir(dir string, create bool) error {
 	info, err := os.Lstat(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -184,13 +179,12 @@ func privateDir(dir string, create bool) error {
 	return nil
 }
 
-// prepareDirs makes the state directory and the pools' JIT config
-// directories, and checks the ones that already exist.
+// prepareDirs creates or checks the state and JIT config directories.
 func prepareDirs(stateDir string, pools map[string]*config.Pool) error {
 	return eachDir(stateDir, pools, func(dir string) error { return privateDir(dir, true) })
 }
 
-// CheckDirs checks the directories in cfg that already exist, as Run would.
+// CheckDirs checks cfg's existing directories as Run would, creating none.
 func CheckDirs(cfg *config.Config) error {
 	return eachDir(cfg.StateDir, cfg.Pools, func(dir string) error { return privateDir(dir, false) })
 }

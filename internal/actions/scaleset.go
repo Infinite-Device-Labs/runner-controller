@@ -65,8 +65,8 @@ func (c *client) EnsureScaleSet(ctx context.Context, spec ScaleSetSpec) (int, er
 		Name:          spec.Name,
 		RunnerGroupID: groupID,
 		Labels:        labels(spec),
-		// The unit's image pins the runner's version. A runner that updates
-		// itself mid-job would spend the job doing it.
+		// The unit's image pins the runner version; self-update would eat
+		// into the job.
 		RunnerSetting: scaleset.RunnerSetting{DisableUpdate: true},
 	}
 
@@ -206,11 +206,10 @@ func (s *session) Close(ctx context.Context) error {
 	return s.s.Close(ctx)
 }
 
-// withholdJITConfig keeps a runner's credentials out of an error. When
-// GitHub's answer can't be decoded, actions/scaleset quotes what its decoder
-// left of the response body, and the body of a successful answer is the JIT
-// config. Any error on a 200 is withheld whole, since the quote needn't say
-// what it is; refusals carry GitHub's message, not credentials, and pass.
+// withholdJITConfig keeps runner credentials out of errors. On a decode
+// failure actions/scaleset quotes the rest of the body, which on a 200 is
+// the JIT config, so any error on a 200 is replaced whole. Refusals carry
+// GitHub's message, not credentials, and pass through.
 func withholdJITConfig(err error) error {
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, `status="200 `) || strings.Contains(msg, "decode") || strings.Contains(msg, "encodedjitconfig") {

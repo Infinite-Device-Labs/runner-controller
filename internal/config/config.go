@@ -296,8 +296,7 @@ func (b ByteSize) String() string {
 	return strconv.FormatInt(int64(b), 10)
 }
 
-// AppID is an App's numeric ID or its client ID, so either can be written
-// without quotes or with them.
+// AppID is an App's numeric ID or client ID, quoted or not.
 type AppID string
 
 // UnmarshalTOML accepts 123456 or "Iv1.abc123".
