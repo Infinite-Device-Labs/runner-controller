@@ -1,7 +1,10 @@
 #!/usr/bin/env sh
 # Installed by `just install-hooks`, which points core.hooksPath here.
-# Copied from the workflow plugin's justfile-conventions template
-# (LealSoftware/claude-plugins); never edit it here.
+# Copied from the shared workflow plugin's justfile-conventions template;
+# never edit it here.
+# Its own version, raised when it changes, so the session-wrap-up sweep can
+# tell a stale copy from a current one:
+# __version__ = "0.21.0"
 #
 # GitHub's free plan offers no branch protection on a private repository, so
 # nothing server-side can refuse a push that breaks `main`. This hook and the
@@ -25,7 +28,8 @@ while read -r _local_ref _local_sha remote_ref _remote_sha; do
 pre-push: refusing to push to ${remote_ref#refs/heads/}.
 
 It changes only by merging a pull request. Push your branch and open one,
-then merge it with \`just pr-merge <branch>\`.
+then merge it once its checks pass (\`just pr-merge <branch>\`, where the
+repo has that recipe).
 
 (\`git push --no-verify\` overrides this, deliberately.)
 MSG

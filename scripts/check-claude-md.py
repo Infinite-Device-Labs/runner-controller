@@ -3,10 +3,10 @@
 
     check-claude-md.py [--max-lines 200]
 
-Copied from the workflow plugin's justfile-conventions template
-(LealSoftware/claude-plugins). Never edit it here: change it there and copy
-it back. A repo with a reason for a bigger root file passes --max-lines.
-`--version` says which release a copy came from.
+Copied from the shared workflow plugin's justfile-conventions template.
+Never edit it here: change it there and copy it back. A repo with a reason
+for a bigger root file passes --max-lines. `--version` says which version
+of the script a copy is.
 
 For every tracked or new CLAUDE.md and SKILL.md:
 
@@ -20,9 +20,6 @@ For every tracked or new CLAUDE.md and SKILL.md:
 - an @-import in a CLAUDE.md. Imports load eagerly at session start, so
   importing sharded files back undoes the sharding while the file still
   looks short. Refer to other docs by plain path instead.
-
-Merges enquiries-service's claude-md-budget and server-playbook's
-check_claude_md_size.py, which grew up separately.
 """
 import argparse
 import pathlib
@@ -31,7 +28,7 @@ import subprocess
 import sys
 
 SKILL_MAX = 500
-__version__ = "0.18.0"
+__version__ = "0.21.0"
 TODO_RE = re.compile(r"^#+\s*to-?do\b", re.I | re.M)
 # `@` at line start or after whitespace, then something path-shaped. Not
 # `pkg@1.2`, an email address or a DNS selector, all preceded by a non-space.

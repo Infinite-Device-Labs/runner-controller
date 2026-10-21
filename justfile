@@ -95,8 +95,8 @@ verify-all: format-check lint check test lint-commits scan-secrets check-claude-
 # --- Shipping --------------------------------------------------------------
 
 # Once per clone. GitHub's free plan has no branch protection on private
-# repos, so these hooks and pr-merge are what refuse a commit or push to
-# main or staging. See .githooks/ for the escape hatches.
+# repos, so these hooks and the merge on green are what refuse a commit or
+# push to main or staging. See .githooks/ for the escape hatches.
 #
 # It also keeps an SSH push's connection alive. Git connects to the remote
 # before pre-push runs and sends the pack only once the hook returns, so the
@@ -124,13 +124,3 @@ install-hooks:
     elif [ "$current" != "$keepalive" ]; then
         echo "kept: core.sshCommand is already set ($current); add ServerAliveInterval to it if pushes die with exit 141"
     fi
-
-# The shared script, from the installed workflow plugin rather than a copy:
-# it runs only on a developer's machine, never in CI.
-[doc("Merge a PR on green with a merge commit, then remove its worktree and branches")]
-pr-merge +args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    script="$HOME/.claude/plugins/marketplaces/leal-software/plugins/workflow/skills/ship-change/scripts/pr-merge.sh"
-    [ -f "$script" ] || { echo "pr-merge: install the workflow plugin first: claude plugin marketplace add LealSoftware/claude-plugins && claude plugin install workflow@leal-software" >&2; exit 1; }
-    exec bash "$script" {{ args }}
