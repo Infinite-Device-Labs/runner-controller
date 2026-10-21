@@ -38,8 +38,8 @@ type fakeClient struct {
 	opens    int
 }
 
-func (f *fakeClient) EnsureScaleSet(ctx context.Context, spec actions.ScaleSetSpec) (int, error) {
-	return f.id, nil
+func (f *fakeClient) EnsureScaleSet(ctx context.Context, spec actions.ScaleSetSpec) (int, actions.Change, error) {
+	return f.id, actions.Unchanged, nil
 }
 
 func (f *fakeClient) OpenSession(ctx context.Context, scaleSetID int, owner string) (actions.Session, error) {

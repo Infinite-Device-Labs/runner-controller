@@ -51,12 +51,12 @@ type client struct {
 	version string
 }
 
-func (c *client) EnsureScaleSet(ctx context.Context, spec ScaleSetSpec) (int, error) {
+func (c *client) EnsureScaleSet(ctx context.Context, spec ScaleSetSpec) (int, Change, error) {
 	groupID := 1 // the default group's ID is always 1
 	if spec.RunnerGroup != scaleset.DefaultRunnerGroup {
 		g, err := c.c.GetRunnerGroupByName(ctx, spec.RunnerGroup)
 		if err != nil {
-			return 0, fmt.Errorf("finding runner group %q: %w", spec.RunnerGroup, err)
+			return 0, "", fmt.Errorf("finding runner group %q: %w", spec.RunnerGroup, err)
 		}
 		groupID = g.ID
 	}
@@ -72,22 +72,25 @@ func (c *client) EnsureScaleSet(ctx context.Context, spec ScaleSetSpec) (int, er
 
 	got, err := c.c.GetRunnerScaleSet(ctx, groupID, spec.Name)
 	if err != nil {
-		return 0, fmt.Errorf("looking up scale set %q: %w", spec.Name, err)
+		return 0, "", fmt.Errorf("looking up scale set %q: %w", spec.Name, err)
 	}
+	change := Unchanged
 	switch {
 	case got == nil:
 		got, err = c.c.CreateRunnerScaleSet(ctx, want)
 		if err != nil {
-			return 0, fmt.Errorf("creating scale set %q: %w", spec.Name, err)
+			return 0, "", fmt.Errorf("creating scale set %q: %w", spec.Name, err)
 		}
+		change = Created
 	case !sameLabels(got.Labels, want.Labels) || got.RunnerSetting != want.RunnerSetting:
 		got, err = c.c.UpdateRunnerScaleSet(ctx, got.ID, want)
 		if err != nil {
-			return 0, fmt.Errorf("updating scale set %q: %w", spec.Name, err)
+			return 0, "", fmt.Errorf("updating scale set %q: %w", spec.Name, err)
 		}
+		change = Updated
 	}
 	c.c.SetSystemInfo(systemInfo(c.version, got.ID))
-	return got.ID, nil
+	return got.ID, change, nil
 }
 
 func labels(spec ScaleSetSpec) []scaleset.Label {

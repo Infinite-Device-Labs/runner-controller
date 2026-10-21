@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -171,4 +173,37 @@ func TestASessionCarriesOnIfListingLeftoversFails(t *testing.T) {
 		t.Error("the session stopped instead of polling")
 	}
 	equal(t, "acquired", sess.acquired, nil)
+}
+
+func TestDebugLoggingShowsJobEventsAndAcquirableListings(t *testing.T) {
+	h := newHarness(t, "10G", map[string]*config.Pool{"p": pool("ci-runner", "2G", 0, 0)}, set("a", "p"))
+	var out bytes.Buffer
+	h.c.log = slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	h.clients["a"].session = &fakeSession{
+		stats: actions.Statistics{AssignedJobs: 1},
+		messages: []*actions.Message{{
+			ID:         4,
+			Statistics: actions.Statistics{AssignedJobs: 1, RunningJobs: 1},
+			Started:    []actions.Job{{RequestID: 9, RunnerName: "host-p-0-ab"}},
+		}},
+	}
+	h.c.session(context.Background(), h.c.byName["a"])
+
+	for _, want := range []string{
+		`msg="listed acquirable jobs" scale_set=a jobs=0`,
+		`msg=message scale_set=a id=4 available_jobs=0 assigned_jobs=1 running_jobs=1`,
+		`msg="job event" scale_set=a event=started request_id=9 runner=host-p-0-ab`,
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("no %q in\n%s", want, out.String())
+		}
+	}
+
+	// At info level, none of it.
+	out.Reset()
+	h.c.log = slog.New(slog.NewTextHandler(&out, nil))
+	h.c.observe(h.c.byName["a"], actions.Statistics{}, &actions.Message{Started: []actions.Job{{RequestID: 10}}})
+	if strings.Contains(out.String(), "job event") {
+		t.Errorf("job events logged at info level:\n%s", out.String())
+	}
 }

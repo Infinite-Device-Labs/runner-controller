@@ -14,8 +14,8 @@ import (
 // Client is the scale set API of one organisation or repository.
 type Client interface {
 	// EnsureScaleSet returns the scale set's ID, creating it or updating its
-	// labels as needed.
-	EnsureScaleSet(ctx context.Context, spec ScaleSetSpec) (int, error)
+	// labels as needed, and which it did.
+	EnsureScaleSet(ctx context.Context, spec ScaleSetSpec) (int, Change, error)
 	// OpenSession opens the scale set's message session; only one may be
 	// open at a time.
 	OpenSession(ctx context.Context, scaleSetID int, owner string) (Session, error)
@@ -50,6 +50,15 @@ type Session interface {
 // ErrJobStillRunning: GitHub still counts the runner's job as running. It
 // clears once the job ends or GitHub gives up on the runner.
 var ErrJobStillRunning = errors.New("the runner's job is still running")
+
+// Change is what EnsureScaleSet did to the scale set.
+type Change string
+
+const (
+	Unchanged Change = "unchanged"
+	Created   Change = "created"
+	Updated   Change = "updated"
+)
 
 // ScaleSetSpec is a scale set as configured.
 type ScaleSetSpec struct {

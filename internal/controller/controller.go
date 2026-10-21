@@ -162,7 +162,7 @@ func New(cfg *config.Config, clients map[string]actions.Client, sd systemd.Manag
 // jobs; the next run adopts them.
 func (c *Controller) Run(ctx context.Context) error {
 	for _, s := range c.sets {
-		id, err := s.client.EnsureScaleSet(ctx, actions.ScaleSetSpec{
+		id, change, err := s.client.EnsureScaleSet(ctx, actions.ScaleSetSpec{
 			Name:        s.cfg.Name,
 			RunnerGroup: s.cfg.RunnerGroup,
 			Labels:      s.cfg.Labels,
@@ -171,7 +171,7 @@ func (c *Controller) Run(ctx context.Context) error {
 			return err
 		}
 		s.id = id
-		c.log.Info("scale set ready", "scale_set", s.cfg.Name, "id", id, "pool", s.pool.Name)
+		c.log.Info("scale set ready", "scale_set", s.cfg.Name, "id", id, "change", change, "pool", s.pool.Name)
 	}
 	if err := prepareDirs(c.stateDir, c.pools); err != nil {
 		return err
