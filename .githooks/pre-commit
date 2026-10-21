@@ -1,7 +1,10 @@
 #!/usr/bin/env sh
 # Installed by `just install-hooks`, which points core.hooksPath here.
-# Copied from the workflow plugin's justfile-conventions template
-# (LealSoftware/claude-plugins); never edit it here.
+# Copied from the shared workflow plugin's justfile-conventions template;
+# never edit it here.
+# Its own version, raised when it changes, so the session-wrap-up sweep can
+# tell a stale copy from a current one:
+# __version__ = "0.21.0"
 #
 # Refuses to commit while `main` or `staging` is checked out. Work happens on
 # a branch in its own worktree and reaches those branches only as a merge

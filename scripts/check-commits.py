@@ -4,11 +4,11 @@
     check-commits.py [--base origin/main] [--target main]
                      [--no-scope | --scopes a,b] [--require-issue]
 
-Copied from the workflow plugin's justfile-conventions template
-(LealSoftware/claude-plugins). Never edit it here: change it there and copy
-it back, so every repo checks commits the same way. A repo's own rules come
-in as flags, which is why the script never needs editing. `--version` says
-which release a copy came from.
+Copied from the shared workflow plugin's justfile-conventions template.
+Never edit it here: change it there and copy it back, so every repo checks
+commits the same way. A repo's own rules come in as flags, which is why the
+script never needs editing. `--version` says which version of the script a
+copy is.
 
 Every commit since the merge base with --base, merges excluded (GitHub's
 "Merge pull request" isn't one we author), must be
@@ -69,7 +69,7 @@ HEADER_RE = re.compile(
 )
 MAX_HEADER = 72
 GENERATED_BY = ("dependabot[bot]",)
-__version__ = "0.18.0"
+__version__ = "0.21.0"
 
 # A footer line that names an issue, whether or not git reads it as a trailer.
 LINK_LINE_RE = re.compile(
@@ -187,8 +187,7 @@ def target_branch(base, explicit):
 
     The base's name is only evidence when the base is a branch: a commit
     such as `github.event.before` names no branch, and reading its last
-    path component as one is what refused `Closes:` on pushes to main
-    (claude-plugins#63)."""
+    path component as one is what refused `Closes:` on pushes to main."""
     if explicit:
         return explicit
     ref = subprocess.run(["git", "rev-parse", "--verify", "--quiet", "--symbolic-full-name", base],

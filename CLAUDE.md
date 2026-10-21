@@ -34,9 +34,9 @@ description there. If a command has no recipe, add one.
 **`just verify-all` is the gate**, and CI runs exactly it on every push.
 Run it before calling a change done. **`just install-hooks` once per
 clone**: the hooks refuse commits and pushes to `main` and run
-`verify-all` before a push. Merge with **`just pr-merge <branch>`**, which
-waits for green. `scripts/check-*.py` and `.githooks/` are copies of the
-workflow plugin's template: never edit them here.
+`verify-all` before a push. Merge on green, with a merge commit.
+`scripts/check-*.py` and `.githooks/` are copies of the workflow plugin's
+template: never edit them here.
 
 ## Git
 
