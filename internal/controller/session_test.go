@@ -134,3 +134,41 @@ func TestListenBacksOffAndResetsAfterAHealthySession(t *testing.T) {
 		t.Error("the session wasn't closed")
 	}
 }
+
+func TestASessionAcquiresJobsOfferedWhileNoneWasOpen(t *testing.T) {
+	h := newHarness(t, "10G", map[string]*config.Pool{"p": pool("ci-runner", "2G", 0, 0)}, set("a", "p"))
+	queued := h.at(-10 * time.Minute)
+	fc := h.clients["a"]
+	fc.acquirable = []actions.Job{{RequestID: 7, QueueTime: queued}}
+	sess := &fakeSession{stats: actions.Statistics{AvailableJobs: 1}}
+	fc.session = sess
+
+	h.c.session(context.Background(), h.c.byName["a"])
+	equal(t, "acquired", sess.acquired, []int64{7})
+	if got := h.c.byName["a"].pending[7]; !got.Equal(queued) {
+		t.Errorf("job 7 pending since %v, want %v", got, queued)
+	}
+}
+
+func TestASessionWithNothingWaitingDoesntAsk(t *testing.T) {
+	h := newHarness(t, "10G", map[string]*config.Pool{"p": pool("ci-runner", "2G", 0, 0)}, set("a", "p"))
+	h.clients["a"].session = &fakeSession{}
+	h.c.session(context.Background(), h.c.byName["a"])
+	if n := h.clients["a"].acquirableAsks; n != 0 {
+		t.Errorf("asked for acquirable jobs %d times with none available", n)
+	}
+}
+
+func TestASessionCarriesOnIfListingLeftoversFails(t *testing.T) {
+	h := newHarness(t, "10G", map[string]*config.Pool{"p": pool("ci-runner", "2G", 0, 0)}, set("a", "p"))
+	fc := h.clients["a"]
+	fc.acquirableErr = errors.New("404 Not Found")
+	sess := &fakeSession{stats: actions.Statistics{AvailableJobs: 1}}
+	fc.session = sess
+
+	h.c.session(context.Background(), h.c.byName["a"])
+	if len(sess.lastIDs) == 0 {
+		t.Error("the session stopped instead of polling")
+	}
+	equal(t, "acquired", sess.acquired, nil)
+}

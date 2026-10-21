@@ -29,6 +29,10 @@ type fakeClient struct {
 	jits    []string // runner names registered
 	removed []string // "id/name" of registrations removed
 	session *fakeSession
+	// acquirable answers AcquirableJobs, or acquirableErr fails it.
+	acquirable     []actions.Job
+	acquirableErr  error
+	acquirableAsks int
 	// openErrs fail the next OpenSession calls, one each.
 	openErrs []error
 	opens    int
@@ -51,6 +55,13 @@ func (f *fakeClient) OpenSession(ctx context.Context, scaleSetID int, owner stri
 		return nil, errors.New("no session")
 	}
 	return f.session, nil
+}
+
+func (f *fakeClient) AcquirableJobs(ctx context.Context, scaleSetID int) ([]actions.Job, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.acquirableAsks++
+	return f.acquirable, f.acquirableErr
 }
 
 func (f *fakeClient) GenerateJITConfig(ctx context.Context, scaleSetID int, runnerName string) (*actions.JITConfig, error) {

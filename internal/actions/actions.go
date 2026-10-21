@@ -19,6 +19,9 @@ type Client interface {
 	// OpenSession opens the scale set's message session; only one may be
 	// open at a time.
 	OpenSession(ctx context.Context, scaleSetID int, owner string) (Session, error)
+	// AcquirableJobs lists jobs available to the scale set and not yet
+	// acquired, including those offered to a session that is gone.
+	AcquirableJobs(ctx context.Context, scaleSetID int) ([]Job, error)
 	// GenerateJITConfig registers a single-job runner and returns its
 	// config.
 	GenerateJITConfig(ctx context.Context, scaleSetID int, runnerName string) (*JITConfig, error)
@@ -65,6 +68,9 @@ type JITConfig struct {
 // Statistics are GitHub's current counts for a scale set, complete where a
 // message's job events (capped at 50) may not be.
 type Statistics struct {
+	// AvailableJobs counts jobs offered to the scale set and not yet
+	// acquired.
+	AvailableJobs int
 	// AssignedJobs counts jobs assigned, waiting or running: the runners
 	// needed before min_runners.
 	AssignedJobs int

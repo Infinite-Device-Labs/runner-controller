@@ -136,7 +136,9 @@ current.
 `just install-hooks` once after cloning.
 
 - `internal/actions` is the only package that imports actions/scaleset, so a
-  change in its preview API touches one package.
+  change in its preview API touches one package. It uses a patched copy of
+  v0.4.0 in `internal/scaleset`, which adds the one call upstream lacks; its
+  README says what changed.
 - `internal/controller` decides: the budget, the order across scale sets, and
   cleanup. Its tests run against fakes of `actions.Client` and of systemd.
 - `internal/systemd` runs `systemctl`.
