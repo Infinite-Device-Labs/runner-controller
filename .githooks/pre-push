@@ -1,0 +1,50 @@
+#!/usr/bin/env sh
+# Installed by `just install-hooks`, which points core.hooksPath here.
+# Copied from the workflow plugin's justfile-conventions template
+# (LealSoftware/claude-plugins); never edit it here.
+#
+# GitHub's free plan offers no branch protection on a private repository, so
+# nothing server-side can refuse a push that breaks `main`. This hook and the
+# merge on green (`just pr-merge`) are the two places that can say no.
+#
+# 1. Refuses any push that would update `main` or `staging` directly, deletion
+#    included. They change only by merging a pull request, which happens on
+#    GitHub's side and never passes through here. Checked first because it's
+#    instant, and a push that is wrong in kind shouldn't wait on the suite.
+# 2. Runs `just verify-all`, the same gate CI runs, before anything leaves
+#    the machine.
+#
+# Escape hatches: `git push --no-verify` skips both. SKIP_VERIFY=1 skips only
+# the checks (for backing up a work-in-progress branch), never the guard.
+set -e
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+    case "$remote_ref" in
+        refs/heads/main|refs/heads/staging)
+            cat >&2 <<MSG
+pre-push: refusing to push to ${remote_ref#refs/heads/}.
+
+It changes only by merging a pull request. Push your branch and open one,
+then merge it with \`just pr-merge <branch>\`.
+
+(\`git push --no-verify\` overrides this, deliberately.)
+MSG
+            exit 1
+            ;;
+    esac
+done
+
+if [ -n "${SKIP_VERIFY:-}" ]; then
+    echo "pre-push: SKIP_VERIFY set, skipping just verify-all" >&2
+    exit 0
+fi
+
+# Git exports GIT_DIR (and, for some hooks, GIT_INDEX_FILE) to a hook run
+# from a worktree. Left set, any `git` the gate runs in another directory,
+# such as a test's throwaway repo, acts on this repository instead: on
+# 2026-10-21 one re-initialised it as bare and committed onto the branch.
+# shellcheck disable=SC2046
+unset $(git rev-parse --local-env-vars)
+
+echo "pre-push: running just verify-all (SKIP_VERIFY=1 to bypass)" >&2
+just verify-all

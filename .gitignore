@@ -1,0 +1,8 @@
+# Claude Code's per-machine state. Worktrees are full checkouts, and a
+# stray `git add -A` from the primary clone must not pick one up.
+/.claude/*
+!/.claude/settings.json
+!/.claude/skills/
+
+# `just build`'s output.
+/dist/

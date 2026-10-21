@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+# Installed by `just install-hooks`, which points core.hooksPath here.
+# Copied from the workflow plugin's justfile-conventions template
+# (LealSoftware/claude-plugins); never edit it here.
+#
+# Refuses to commit while `main` or `staging` is checked out. Work happens on
+# a branch in its own worktree and reaches those branches only as a merge
+# commit from a pull request, so a commit made here is a mistake, or about to
+# become one the moment it's pushed. The primary clone is where this bites:
+# it keeps `main` checked out, and a session that forgets to start a worktree
+# lands its edits straight on it.
+#
+# A detached HEAD is allowed, since it belongs to no branch.
+# Escape hatch: `git commit --no-verify`, deliberately.
+set -e
+
+branch=$(git symbolic-ref --short -q HEAD || true)
+
+case "$branch" in
+    main|staging)
+        cat >&2 <<MSG
+pre-commit: refusing to commit on $branch.
+
+Start the work in a worktree on its own branch instead, e.g.
+
+    git worktree add .claude/worktrees/<topic> -b worktree-<topic> origin/$branch
+
+(\`git commit --no-verify\` overrides this, deliberately.)
+MSG
+        exit 1
+        ;;
+esac

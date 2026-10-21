@@ -1,0 +1,44 @@
+# Runs `just verify-all`, the same gate as a local run and the pre-push hook,
+# on every push. Goes to .github/workflows/ci.yml.
+#
+# `push` with no branch filter and no `pull_request`: a branch is checked
+# before it has a PR, a PR doesn't run twice, and the push run still shows
+# on the PR.
+name: CI
+
+on:
+  push:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Full history: lint-commits compares against the merge base with
+      # origin/main, and scan-secrets reads every commit.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: extractions/setup-just@v4
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # The binary, pinned by version and sha256, rather than gitleaks-action,
+      # which needs a licence key for organisation repos. The hash is the
+      # release's own checksums.txt, cross-checked against GitHub's asset
+      # digest. Bump both together, here and in the template.
+      - name: Install gitleaks 8.30.0
+        run: |
+          curl -sSLo gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.0/gitleaks_8.30.0_linux_x64.tar.gz
+          echo "79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e  gitleaks.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin" && tar -xzf gitleaks.tar.gz -C "$HOME/.local/bin" gitleaks && rm gitleaks.tar.gz
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # A repo that integrates on staging: make the justfile's lint-commits
+      # default base="origin/staging", so a branch is compared with what it
+      # merges into. verify-all takes no arguments, so CI can't pass one.
+      - name: just verify-all
+        run: just verify-all

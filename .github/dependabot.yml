@@ -1,0 +1,40 @@
+# Dependabot version updates. Goes to .github/dependabot.yml.
+#
+# Without it there are no version updates at all, only security alerts.
+# Weekly, not daily: a PR every morning is how you teach yourself to stop
+# reading them.
+#
+# The commit-message prefixes make every update a Conventional Commit.
+# lint-commits skips Dependabot's commits anyway, because a grouped update's
+# header ("Bump the ... group across 1 directory with 2 updates") is
+# capitalised and too long to pass.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+    # One PR a week for the routine bumps. Majors still get their own, since
+    # that's where the breaking changes are.
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # The module's own dependencies, weekly like the actions.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: build
+    groups:
+      gomod-minor-and-patch:
+        update-types:
+          - minor
+          - patch
