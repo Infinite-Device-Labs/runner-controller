@@ -1,0 +1,21 @@
+# The controller itself. It runs as root, since it starts system units.
+[Unit]
+Description=Starts ephemeral GitHub Actions runners on demand
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/runner-controller -config /etc/runner-controller/config.toml
+Restart=on-failure
+RestartSec=10s
+# /var/lib/runner-controller: the record of the runners it started.
+StateDirectory=runner-controller
+StateDirectoryMode=0700
+# /run/runner-controller: the JIT config files. Kept across a restart of the
+# controller, since the units it adopts still read theirs.
+RuntimeDirectory=runner-controller
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+
+[Install]
+WantedBy=multi-user.target

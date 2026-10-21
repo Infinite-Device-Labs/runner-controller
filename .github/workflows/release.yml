@@ -1,0 +1,48 @@
+# Publishes a release for a pushed v* tag: the static linux/amd64 binary and
+# its SHA256SUMS, so an installer can pin both.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Creating the release is the only write.
+    permissions:
+      contents: write
+    # Pinned by commit, since this job can write releases and builds what
+    # installers trust: a moved tag can't change what runs. Dependabot keeps
+    # the pins and their comments current.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # A release builds from the module alone, not from a cache an
+          # earlier run could have left.
+          cache: false
+
+      - name: just test
+        run: just test
+
+      - name: just release-build
+        run: just release-build "$GITHUB_REF_NAME"
+
+      # --verify-tag: never create the tag here, only publish the pushed one.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          dist/runner-controller-linux-amd64 dist/SHA256SUMS
+          --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
