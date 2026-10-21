@@ -19,7 +19,9 @@ NotifyAccess=all
 Delegate=yes
 KillMode=mixed
 # The controller removes the file once the unit has exited.
-ExecStart=/usr/bin/podman run --rm --replace --name=ci-runner-%i \
+# --init: run.sh is a shell script, and a shell as PID 1 ignores SIGTERM,
+# so without it every stop waits out the timeout and ends in SIGKILL.
+ExecStart=/usr/bin/podman run --rm --replace --init --name=ci-runner-%i \
     --cgroups=split --sdnotify=conmon \
     --env-file=/run/runner-controller/small/%i.env \
     ghcr.io/actions/actions-runner:latest /home/runner/run.sh

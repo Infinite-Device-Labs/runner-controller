@@ -49,7 +49,12 @@ behind NAT with nothing exposed.
   and adopts the units still running, so restarting the controller doesn't
   stop a job. A runner that exits without running a job, or fails to start,
   holds its scale set back for a while, doubling up to five minutes, rather
-  than being replaced at once.
+  than being replaced at once. Whether it ran one is GitHub's word: a job's
+  started event can lag by a long poll, so a runner GitHub still counts as
+  running a job isn't a failure. A runner that dies mid-job leaves a job GitHub
+  counts as running for several minutes; the controller doesn't start a
+  runner for that job, and removes the dead runner's registration as soon as
+  GitHub lets go of it.
 
 Put the units in a systemd slice whose `MemoryMax` equals the budget. Then a
 miscount in the controller ends in a killed job, not a starved host.

@@ -116,9 +116,14 @@ func (c *Controller) acquireLeftovers(ctx context.Context, s *scaleSet, sess act
 	if len(jobs) == 0 {
 		return nil
 	}
-	ids := make([]int64, len(jobs))
-	for i, j := range jobs {
-		ids[i] = j.RequestID
+	var ids []int64
+	for _, j := range jobs {
+		if j.RequestID != 0 {
+			ids = append(ids, j.RequestID)
+		}
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("%d acquirable jobs listed, none with a request ID (#12)", len(jobs))
 	}
 	if err := sess.AcquireJobs(ctx, ids); err != nil {
 		return err
@@ -138,7 +143,8 @@ func (c *Controller) observe(s *scaleSet, st actions.Statistics, msg *actions.Me
 		c.logEvents(s, msg)
 		for _, jobs := range [][]actions.Job{msg.Available, msg.Assigned} {
 			for _, j := range jobs {
-				if _, ok := s.pending[j.RequestID]; ok {
+				// A zero ID would collapse every job into one entry (#12).
+				if _, ok := s.pending[j.RequestID]; ok || j.RequestID == 0 {
 					continue
 				}
 				t := j.QueueTime
@@ -157,7 +163,16 @@ func (c *Controller) observe(s *scaleSet, st actions.Statistics, msg *actions.Me
 			c.ranJob(j.RunnerName, true)
 		}
 	}
-	s.assigned = st.AssignedJobs
+	// Fewer jobs counted may mean GitHub has failed an orphan's job: retry
+	// its removal now rather than at its next backoff.
+	if st.AssignedJobs < s.assigned || st.RunningJobs < s.running {
+		for _, rm := range c.removals {
+			if rm.Orphan && rm.ScaleSet == s.cfg.Name {
+				rm.Next = now
+			}
+		}
+	}
+	s.assigned, s.running = st.AssignedJobs, st.RunningJobs
 	// Nothing waiting: anything still pending missed its started event.
 	if st.AssignedJobs <= st.RunningJobs && st.AvailableJobs == 0 {
 		clear(s.pending)

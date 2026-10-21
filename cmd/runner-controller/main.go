@@ -69,7 +69,7 @@ func run(configPath string, check bool, log *slog.Logger) error {
 			ID:             string(s.GitHubApp.ID),
 			InstallationID: s.GitHubApp.InstallationID,
 			PrivateKey:     key,
-		}, version)
+		}, version, log)
 		if err != nil {
 			return fmt.Errorf("scale set %q: %w", s.Name, err)
 		}

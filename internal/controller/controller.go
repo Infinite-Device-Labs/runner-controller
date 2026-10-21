@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -76,8 +77,10 @@ type scaleSet struct {
 
 	// The rest is guarded by Controller.mu.
 
-	// assigned is GitHub's count of jobs assigned, waiting or running.
+	// assigned and running are GitHub's counts of jobs assigned (waiting or
+	// running) and running.
 	assigned int
+	running  int
 	// pending maps assigned, not yet started jobs to their queue times.
 	// Messages carry at most 50 events, so it can miss jobs: it only orders
 	// scale sets, while assigned decides how many runners.
@@ -273,14 +276,13 @@ func (c *Controller) release(ctx context.Context, unit string, failed bool) {
 	delete(c.runners, unit)
 	if !r.foreign && !r.deregistered {
 		now := c.now()
-		c.removals = append(c.removals, &removal{ScaleSet: r.ScaleSet, RunnerID: r.ID, Name: r.Name, Since: now, Next: now})
 		// Exiting without running a job is a failure whatever the unit's
 		// result; otherwise a runner that crashes on start is replaced in a
-		// tight loop for as long as its job waits.
-		if s := c.byName[r.ScaleSet]; s != nil && r.started && !r.busy {
-			retryAt := c.backOff(s)
-			c.log.Warn("the runner exited without running a job", "unit", unit, "scale_set", r.ScaleSet, "retry_at", retryAt)
-		}
+		// tight loop for as long as its job waits. Whether it ran one is
+		// settled by the removal, in this same reconcile pass, before any
+		// replacement is planned.
+		c.removals = append(c.removals, &removal{ScaleSet: r.ScaleSet, RunnerID: r.ID, Name: r.Name, Since: now, Next: now,
+			IdleExit: r.started && !r.busy})
 	}
 	c.mu.Unlock()
 	c.save()
@@ -298,6 +300,9 @@ func (c *Controller) backOff(s *scaleSet) time.Time {
 const (
 	removalRetry   = time.Minute
 	removalRetryUp = 15 * time.Minute
+	// orphanRetryUp caps the retry gap for an orphan; observe also retries
+	// it as soon as the scale set's counts drop.
+	orphanRetryUp = 2 * time.Minute
 	// removalGiveUp: GitHub itself removes an ephemeral runner offline for a
 	// day.
 	removalGiveUp = 24 * time.Hour
@@ -324,16 +329,36 @@ func (c *Controller) removeRegistrations(ctx context.Context) {
 			err = s.client.RemoveRunner(ctx, rm.RunnerID, rm.Name)
 		}
 		c.mu.Lock()
+		if rm.IdleExit && s != nil {
+			rm.IdleExit = false
+			if errors.Is(err, actions.ErrJobStillRunning) {
+				c.log.Info("the runner exited mid-job before its job's started event arrived", "runner", rm.Name, "scale_set", rm.ScaleSet)
+			} else {
+				retryAt := c.backOff(s)
+				c.log.Warn("the runner exited without running a job", "runner", rm.Name, "scale_set", rm.ScaleSet, "retry_at", retryAt)
+			}
+		}
 		switch {
 		case s == nil:
 			c.log.Warn("can't remove the registration of a runner whose scale set is no longer configured", "runner", rm.Name, "scale_set", rm.ScaleSet)
 			c.dropRemoval(rm)
 		case err == nil:
-			c.log.Debug("registration removed", "runner", rm.Name)
+			if rm.Orphan {
+				c.log.Info("GitHub has let go of a dead runner's job", "runner", rm.Name, "scale_set", rm.ScaleSet)
+			} else {
+				c.log.Debug("registration removed", "runner", rm.Name)
+			}
 			c.dropRemoval(rm)
 		case now.Sub(rm.Since) > removalGiveUp:
 			c.log.Warn("giving up removing a runner's registration", "runner", rm.Name, "error", err)
 			c.dropRemoval(rm)
+		case errors.Is(err, actions.ErrJobStillRunning):
+			if !rm.Orphan {
+				c.log.Info("the runner died mid-job; GitHub still counts its job as running, so it isn't replaced", "runner", rm.Name, "scale_set", rm.ScaleSet)
+			}
+			rm.Orphan = true
+			rm.Attempts++
+			rm.Next = now.Add(backoff(removalRetry, orphanRetryUp, rm.Attempts))
 		default:
 			rm.Attempts++
 			rm.Next = now.Add(backoff(removalRetry, removalRetryUp, rm.Attempts))
@@ -388,7 +413,9 @@ func (c *Controller) plan() []*runner {
 			}
 		}
 	}
-	need := func(s *scaleSet) int { return s.pool.MinRunners + s.assigned - live[s] }
+	orphans := c.orphans()
+	assigned := func(s *scaleSet) int { return max(s.assigned-orphans[s.cfg.Name], 0) }
+	need := func(s *scaleSet) int { return s.pool.MinRunners + assigned(s) - live[s] }
 	for _, s := range c.sets {
 		switch {
 		case need(s) <= 0:
@@ -412,7 +439,7 @@ func (c *Controller) plan() []*runner {
 			key := priority{since: s.demandSince, index: s.index}
 			// More jobs than runners means a job is waiting, rather than
 			// only min_runners being short.
-			if key.waiting = s.assigned > live[s]; key.waiting {
+			if key.waiting = assigned(s) > live[s]; key.waiting {
 				// Runners not yet busy take the oldest waiting jobs; the
 				// first job after those is the one still waiting.
 				if t, ok := s.nthPending(live[s] - busy[s]); ok {
@@ -453,6 +480,18 @@ func (c *Controller) plan() []*runner {
 		inPool[best.pool.Name]++
 		out = append(out, r)
 	}
+}
+
+// orphans counts each scale set's orphaned jobs (see removal.Orphan). Call
+// with c.mu held.
+func (c *Controller) orphans() map[string]int {
+	out := map[string]int{}
+	for _, rm := range c.removals {
+		if rm.Orphan {
+			out[rm.ScaleSet]++
+		}
+	}
+	return out
 }
 
 // priority orders the scale sets that need a runner.
