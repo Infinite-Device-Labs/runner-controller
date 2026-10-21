@@ -45,6 +45,15 @@ type removal struct {
 	Since    time.Time `json:"since"`
 	Attempts int       `json:"attempts,omitempty"`
 	Next     time.Time `json:"next"`
+	// Orphan: the last attempt was refused because GitHub still counts the
+	// runner's job as running. That job is in the scale set's assigned
+	// count but no runner can take it, so it isn't demand.
+	Orphan bool `json:"orphan,omitempty"`
+	// IdleExit: the runner exited with no job event seen. JobStarted can lag
+	// by a long poll, so the first removal attempt decides: a JobStillRunning
+	// refusal shows it had a job; anything else counts a failure against its
+	// scale set.
+	IdleExit bool `json:"idle_exit,omitempty"`
 }
 
 func loadState(dir string) (*state, error) {

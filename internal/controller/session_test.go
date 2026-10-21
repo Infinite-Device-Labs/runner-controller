@@ -207,3 +207,22 @@ func TestDebugLoggingShowsJobEventsAndAcquirableListings(t *testing.T) {
 		t.Errorf("job events logged at info level:\n%s", out.String())
 	}
 }
+
+func TestJobsWithoutARequestIDDontCollapse(t *testing.T) {
+	h := newHarness(t, "10G", map[string]*config.Pool{"p": pool("ci-runner", "2G", 0, 0)}, set("a", "p"))
+	s := h.c.byName["a"]
+	h.c.observe(s, actions.Statistics{AssignedJobs: 2}, &actions.Message{Assigned: []actions.Job{{}, {}}})
+	if len(s.pending) != 0 {
+		t.Errorf("pending %v, want jobs without IDs left out", s.pending)
+	}
+	if s.assigned != 2 {
+		t.Errorf("assigned %d: the statistics still count", s.assigned)
+	}
+
+	// Listed without IDs, there's nothing to acquire.
+	h.clients["a"].acquirable = []actions.Job{{}}
+	sess := &fakeSession{stats: actions.Statistics{AvailableJobs: 1}}
+	h.clients["a"].session = sess
+	h.c.session(context.Background(), s)
+	equal(t, "acquired", sess.acquired, nil)
+}

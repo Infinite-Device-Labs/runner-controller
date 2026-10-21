@@ -19,7 +19,7 @@ const (
 )
 
 // scaleDown stops idle runners beyond a scale set's min_runners plus its
-// assigned jobs, returning their memory to the budget.
+// assigned jobs, less orphans, returning their memory to the budget.
 //
 // GitHub may hand a job to a runner just as it is chosen, so the
 // registration is removed first and the unit stopped only once that
@@ -31,6 +31,7 @@ func (c *Controller) scaleDown(ctx context.Context) {
 	}
 	c.mu.Lock()
 	now := c.now()
+	orphans := c.orphans()
 	var chosen []*runner
 	var stops []*runner
 	for _, s := range c.sets {
@@ -52,7 +53,7 @@ func (c *Controller) scaleDown(ctx context.Context) {
 				idle = append(idle, r)
 			}
 		}
-		surplus := live - (s.pool.MinRunners + s.assigned)
+		surplus := live - (s.pool.MinRunners + max(s.assigned-orphans[s.cfg.Name], 0))
 		if surplus <= 0 || len(idle) == 0 {
 			continue
 		}
