@@ -213,9 +213,9 @@ func TestEnsureScaleSetCreatesUpdatesAndReuses(t *testing.T) {
 	c := f.client(t)
 	ctx := context.Background()
 
-	id, err := c.EnsureScaleSet(ctx, ScaleSetSpec{Name: "linux", RunnerGroup: "default"})
-	if err != nil || id != 42 {
-		t.Fatalf("create: %d, %v", id, err)
+	id, change, err := c.EnsureScaleSet(ctx, ScaleSetSpec{Name: "linux", RunnerGroup: "default"})
+	if err != nil || id != 42 || change != Created {
+		t.Fatalf("create: %d, %q, %v", id, change, err)
 	}
 	created := f.scaleSets["linux"]
 	if got := labelNames(created); !slices.Equal(got, []string{"linux"}) {
@@ -231,16 +231,16 @@ func TestEnsureScaleSetCreatesUpdatesAndReuses(t *testing.T) {
 
 	// The same labels, in another order: nothing to change.
 	f.scaleSets["linux"]["labels"] = []any{map[string]any{"name": "b"}, map[string]any{"name": "a"}}
-	if _, err := c.EnsureScaleSet(ctx, ScaleSetSpec{Name: "linux", RunnerGroup: "default", Labels: []string{"a", "b"}}); err != nil {
-		t.Fatal(err)
+	if _, change, err := c.EnsureScaleSet(ctx, ScaleSetSpec{Name: "linux", RunnerGroup: "default", Labels: []string{"a", "b"}}); err != nil || change != Unchanged {
+		t.Fatalf("matching labels: %q, %v", change, err)
 	}
 	if calls := f.calls(); slices.ContainsFunc(calls, func(s string) bool { return strings.HasPrefix(s, "PATCH") }) {
 		t.Errorf("updated a scale set that matched: %v", calls)
 	}
 
 	// Different labels: updated.
-	if _, err := c.EnsureScaleSet(ctx, ScaleSetSpec{Name: "linux", RunnerGroup: "default", Labels: []string{"a", "c"}}); err != nil {
-		t.Fatal(err)
+	if _, change, err := c.EnsureScaleSet(ctx, ScaleSetSpec{Name: "linux", RunnerGroup: "default", Labels: []string{"a", "c"}}); err != nil || change != Updated {
+		t.Fatalf("changed labels: %q, %v", change, err)
 	}
 	if got := labelNames(f.scaleSets["linux"]); !slices.Equal(got, []string{"a", "c"}) {
 		t.Errorf("labels %v after the update", got)
@@ -249,7 +249,7 @@ func TestEnsureScaleSetCreatesUpdatesAndReuses(t *testing.T) {
 
 func TestEnsureScaleSetLooksUpItsRunnerGroup(t *testing.T) {
 	f := newFakeGitHub(t)
-	if _, err := f.client(t).EnsureScaleSet(context.Background(), ScaleSetSpec{Name: "linux", RunnerGroup: "builders"}); err != nil {
+	if _, _, err := f.client(t).EnsureScaleSet(context.Background(), ScaleSetSpec{Name: "linux", RunnerGroup: "builders"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.scaleSets["linux"]["runnerGroupId"].(float64); got != 7 {

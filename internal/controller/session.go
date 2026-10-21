@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Infinite-Device-Labs/runner-controller/internal/actions"
@@ -74,6 +75,8 @@ func (c *Controller) session(ctx context.Context, s *scaleSet) error {
 			continue
 		}
 		last = msg.ID
+		c.log.Debug("message", "scale_set", s.cfg.Name, "id", msg.ID,
+			"available_jobs", msg.Statistics.AvailableJobs, "assigned_jobs", msg.Statistics.AssignedJobs, "running_jobs", msg.Statistics.RunningJobs)
 		// Ack first, as the upstream listener does; the next message's
 		// statistics correct anything this one's handling misses.
 		if err := sess.DeleteMessage(ctx, msg.ID); err != nil {
@@ -106,8 +109,12 @@ func (c *Controller) acquireLeftovers(ctx context.Context, s *scaleSet, sess act
 		return nil
 	}
 	jobs, err := s.client.AcquirableJobs(ctx, s.id)
-	if err != nil || len(jobs) == 0 {
+	if err != nil {
 		return err
+	}
+	c.log.Debug("listed acquirable jobs", "scale_set", s.cfg.Name, "jobs", len(jobs))
+	if len(jobs) == 0 {
+		return nil
 	}
 	ids := make([]int64, len(jobs))
 	for i, j := range jobs {
@@ -128,6 +135,7 @@ func (c *Controller) observe(s *scaleSet, st actions.Statistics, msg *actions.Me
 	defer c.mu.Unlock()
 	now := c.now()
 	if msg != nil {
+		c.logEvents(s, msg)
 		for _, jobs := range [][]actions.Job{msg.Available, msg.Assigned} {
 			for _, j := range jobs {
 				if _, ok := s.pending[j.RequestID]; ok {
@@ -155,6 +163,22 @@ func (c *Controller) observe(s *scaleSet, st actions.Statistics, msg *actions.Me
 		clear(s.pending)
 	}
 	c.signal()
+}
+
+// logEvents logs each job event at debug level. Messages hold at most 50.
+func (c *Controller) logEvents(s *scaleSet, msg *actions.Message) {
+	if !c.log.Enabled(context.Background(), slog.LevelDebug) {
+		return
+	}
+	for _, e := range []struct {
+		kind string
+		jobs []actions.Job
+	}{{"available", msg.Available}, {"assigned", msg.Assigned}, {"started", msg.Started}, {"completed", msg.Completed}} {
+		for _, j := range e.jobs {
+			c.log.Debug("job event", "scale_set", s.cfg.Name, "event", e.kind, "request_id", j.RequestID,
+				"runner", j.RunnerName, "queued", j.QueueTime, "result", j.Result)
+		}
+	}
 }
 
 // ranJob marks the named runner busy, and done if its job completed. A
