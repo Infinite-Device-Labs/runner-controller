@@ -115,11 +115,11 @@ func (c *Controller) observe(s *scaleSet, st actions.Statistics, msg *actions.Me
 		}
 		for _, j := range msg.Started {
 			delete(s.pending, j.RequestID)
-			c.ranJob(j.RunnerName)
+			c.ranJob(j.RunnerName, false)
 		}
 		for _, j := range msg.Completed {
 			delete(s.pending, j.RequestID)
-			c.ranJob(j.RunnerName)
+			c.ranJob(j.RunnerName, true)
 		}
 	}
 	s.assigned = st.AssignedJobs
@@ -130,16 +130,18 @@ func (c *Controller) observe(s *scaleSet, st actions.Statistics, msg *actions.Me
 	c.signal()
 }
 
-// ranJob marks the named runner busy: it has run a job, so its scale set's
-// runners start and work, and its failures are forgotten. It is called with
-// c.mu held.
-func (c *Controller) ranJob(name string) {
+// ranJob marks the named runner busy, and done once its job completed: it
+// has run a job, so its scale set's runners start and work, and its
+// failures are forgotten. It is called with c.mu held.
+func (c *Controller) ranJob(name string, done bool) {
 	if name == "" {
 		return
 	}
 	for _, r := range c.runners {
 		if r.Name == name {
 			r.busy = true
+			r.adopted = false
+			r.done = r.done || done
 			if s := c.byName[r.ScaleSet]; s != nil {
 				s.failures = 0
 			}

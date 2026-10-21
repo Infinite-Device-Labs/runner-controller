@@ -103,11 +103,31 @@ type runner struct {
 	// started is set once systemctl start has returned. Before then the
 	// unit isn't checked for having exited, though its memory counts.
 	started bool
-	// busy is set once it is seen to run a job.
+	// startedAt is when systemctl start returned, or when a running unit
+	// was adopted.
+	startedAt time.Time
+	// busy is set once it is seen to run a job, and done once that job
+	// has completed: the runner is about to exit, and no longer counts
+	// towards its scale set's runners.
 	busy bool
+	done bool
+	// adopted is a unit found running at startup whose job isn't known. It
+	// counts as busy until GitHub says otherwise.
+	adopted bool
 	// foreign is a running unit in a pool's template that the controller
 	// has no record of. It counts against the budget until it exits.
 	foreign bool
+
+	// Scaling down: stopping is set while its registration is being
+	// removed, deregistered once that succeeded, and stopRequested once
+	// systemd took the stop. A deregistered runner can't take a job, so it
+	// no longer counts towards its scale set's runners, though its memory
+	// counts until its unit exits. nextScaleDown holds back another attempt
+	// after one failed.
+	stopping      bool
+	deregistered  bool
+	stopRequested bool
+	nextScaleDown time.Time
 }
 
 // New returns a Controller for cfg, which must have been checked. clients
@@ -206,6 +226,7 @@ func (c *Controller) signal() {
 func (c *Controller) reconcile(ctx context.Context) {
 	c.checkUnits(ctx)
 	c.removeRegistrations(ctx)
+	c.scaleDown(ctx)
 	c.schedule(ctx)
 }
 
@@ -258,7 +279,9 @@ func (c *Controller) release(ctx context.Context, unit string, failed bool) {
 
 	c.mu.Lock()
 	delete(c.runners, unit)
-	if !r.foreign {
+	// A runner stopped for being idle was deregistered first, and didn't
+	// fail.
+	if !r.foreign && !r.deregistered {
 		now := c.now()
 		c.removals = append(c.removals, &removal{ScaleSet: r.ScaleSet, RunnerID: r.ID, Name: r.Name, Since: now, Next: now})
 		// A runner that exits without having run a job has failed, however
@@ -370,7 +393,7 @@ func (c *Controller) plan() []*runner {
 	for _, r := range c.runners {
 		used += int64(c.pools[r.Pool].Memory)
 		inPool[r.Pool]++
-		if s := c.byName[r.ScaleSet]; s != nil && !r.foreign {
+		if s := c.byName[r.ScaleSet]; s != nil && !r.foreign && !r.deregistered && !r.done {
 			live[s]++
 			if r.busy {
 				busy[s]++
@@ -567,6 +590,7 @@ func (c *Controller) start(ctx context.Context, r *runner) {
 
 	c.mu.Lock()
 	r.started = true
+	r.startedAt = c.now()
 	c.mu.Unlock()
 	log.Info("runner started", "runner_id", jit.RunnerID)
 	c.signal()

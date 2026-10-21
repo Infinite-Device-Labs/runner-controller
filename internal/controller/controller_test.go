@@ -365,7 +365,7 @@ func TestMinRunnersShortestLongestComeFirst(t *testing.T) {
 	x := h.c.byName["x"]
 
 	// x's runner runs a job: x is satisfied, y still waits for memory.
-	h.c.observe(x, actions.Statistics{}, &actions.Message{Completed: []actions.Job{{RequestID: 1, RunnerName: "host-x-0-r1"}}})
+	h.c.observe(x, actions.Statistics{}, &actions.Message{Started: []actions.Job{{RequestID: 1, RunnerName: "host-x-0-r1"}}})
 	equal(t, "started", h.step(), nil)
 	if !x.demandSince.IsZero() {
 		t.Error("x's shortfall wasn't cleared once met")

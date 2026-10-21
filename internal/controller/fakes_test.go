@@ -152,6 +152,8 @@ type fakeSystemd struct {
 	startHook func(unit string) error
 	started   []string
 	reset     []string
+	stopErr   error
+	stopped   []string
 }
 
 func newFakeSystemd() *fakeSystemd { return &fakeSystemd{states: map[string]string{}} }
@@ -205,6 +207,17 @@ func (f *fakeSystemd) List(ctx context.Context, pattern string) (map[string]stri
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeSystemd) Stop(ctx context.Context, unit string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.stopErr != nil {
+		return f.stopErr
+	}
+	f.stopped = append(f.stopped, unit)
+	f.states[unit] = "inactive"
+	return nil
 }
 
 func (f *fakeSystemd) ResetFailed(ctx context.Context, unit string) error {

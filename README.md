@@ -34,6 +34,12 @@ behind NAT with nothing exposed.
   large runners can't be starved. A pool can set a `max_runners` cap, and keep
   `min_runners` started ahead of demand; jobs that are waiting come before
   those.
+- **Idle memory goes back.** A runner whose job was cancelled before it took
+  one sits idle. Once a scale set has more runners than its jobs and its
+  `min_runners` need, and a runner has run for a minute, the controller
+  removes that runner's registration and then stops its unit. GitHub refuses
+  to remove a runner that has just taken a job, and that runner is left to
+  run it.
 - **Keys stay on the host.** The GitHub App keys that register runners are
   read by the controller alone. A job only ever sees a configuration that is
   good for that one job.
