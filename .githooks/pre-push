@@ -4,7 +4,7 @@
 # never edit it here.
 # Its own version, raised when it changes, so the session-wrap-up sweep can
 # tell a stale copy from a current one:
-# __version__ = "0.21.0"
+# __version__ = "0.26.0"
 #
 # GitHub's free plan offers no branch protection on a private repository, so
 # nothing server-side can refuse a push that breaks `main`. This hook and the
@@ -15,13 +15,26 @@
 #    GitHub's side and never passes through here. Checked first because it's
 #    instant, and a push that is wrong in kind shouldn't wait on the suite.
 # 2. Runs `just verify-all`, the same gate CI runs, before anything leaves
-#    the machine.
+#    the machine. Not for a push that only deletes branches: it sends no
+#    commits, so the gate has nothing to check and could only fail for a
+#    reason that has nothing to do with the push.
+#
+#    The gate checks the working tree, so it first refuses a push it can't
+#    vouch for: one that sends a commit other than HEAD's (`git push origin
+#    other-branch`), or one made with uncommitted changes to tracked files,
+#    which the gate would check in place of what is pushed.
 #
 # Escape hatches: `git push --no-verify` skips both. SKIP_VERIFY=1 skips only
 # the checks (for backing up a work-in-progress branch), never the guard.
 set -e
 
-while read -r _local_ref _local_sha remote_ref _remote_sha; do
+only_deletes=yes
+pushed=
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+    # A deletion's local sha is all zeros, whatever the hash's length.
+    case "$local_sha" in
+        *[!0]*) only_deletes= pushed="$pushed $local_sha" ;;
+    esac
     case "$remote_ref" in
         refs/heads/main|refs/heads/staging)
             cat >&2 <<MSG
@@ -38,9 +51,42 @@ MSG
     esac
 done
 
+if [ -n "$only_deletes" ]; then
+    echo "pre-push: only deleting branches, skipping just verify-all" >&2
+    exit 0
+fi
+
 if [ -n "${SKIP_VERIFY:-}" ]; then
     echo "pre-push: SKIP_VERIFY set, skipping just verify-all" >&2
     exit 0
+fi
+
+# A tag is checked as the commit it points to.
+head=$(git rev-parse -q --verify HEAD || true)
+for sha in $pushed; do
+    if [ "$(git rev-parse -q --verify "$sha^{commit}" || true)" != "$head" ]; then
+        cat >&2 <<MSG
+pre-push: refusing a push of something other than the checked-out commit.
+
+just verify-all checks this working tree, which is at ${head:-no commit},
+not the $sha being pushed. Push from the worktree that has it checked out.
+
+(SKIP_VERIFY=1 pushes without the checks; \`git push --no-verify\` skips
+the hook entirely.)
+MSG
+        exit 1
+    fi
+done
+if ! git diff --quiet HEAD --; then
+    cat >&2 <<MSG
+pre-push: refusing to push with uncommitted changes to tracked files.
+
+just verify-all would check them rather than what is pushed. Commit them,
+or set them aside, then push again.
+
+(SKIP_VERIFY=1 pushes without the checks.)
+MSG
+    exit 1
 fi
 
 # Git exports GIT_DIR (and, for some hooks, GIT_INDEX_FILE) to a hook run

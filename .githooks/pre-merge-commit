@@ -1,0 +1,35 @@
+#!/usr/bin/env sh
+# Installed by `just install-hooks`, which points core.hooksPath here.
+# Copied from the shared workflow plugin's justfile-conventions template;
+# never edit it here.
+# Its own version, raised when it changes, so the session-wrap-up sweep can
+# tell a stale copy from a current one:
+# __version__ = "0.26.0"
+#
+# Refuses a merge commit while `main` or `staging` is checked out. The
+# pre-commit hook doesn't run for one, so without this `git merge <branch>`
+# on main went through locally and only the pre-push hook caught it later.
+# Those branches take merges only from a pull request, on GitHub's side. A
+# fast-forward (a plain `git pull` of a clean main) makes no merge commit
+# and isn't affected.
+#
+# Escape hatch: `git merge --no-verify`, deliberately.
+set -e
+
+branch=$(git symbolic-ref --short -q HEAD || true)
+
+case "$branch" in
+    main|staging)
+        cat >&2 <<MSG
+pre-merge-commit: refusing to make a merge commit on $branch.
+
+It takes merges only from a pull request. Merge the branch through one
+(\`just pr-merge <branch>\`, where the repo has that recipe). If this is a
+\`git pull\`, local $branch has commits its remote doesn't: move them to a
+branch of their own.
+
+(\`git merge --no-verify\` overrides this, deliberately.)
+MSG
+        exit 1
+        ;;
+esac
