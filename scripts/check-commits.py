@@ -17,14 +17,22 @@ no trailing period, and a header of at most 72 characters. The scope is
 optional and any lowercase word unless --no-scope (the repo has no
 components yet) or --scopes (only these) says otherwise.
 
-Two footer rules always apply, because release versions and issue state are
-derived from commits:
+`git revert`'s own header, `Revert "<reverted header>"`, passes as it is: git
+writes it, the version tooling reads it as a revert, and the header it quotes
+was checked when that commit landed, or was a merge. A revert written by hand
+is `revert: <description>` like any other type.
 
-- A breaking-change footer is spelled `BREAKING CHANGE:` or
-  `BREAKING-CHANGE:`. `Breaking change:` or `BREAKING:` reads to the version
-  tooling as nothing at all, so the release would come out a patch. In the
-  trailer block it is `BREAKING-CHANGE:`: git reads no trailers from a
-  paragraph holding `BREAKING CHANGE:`, since a trailer key has no space.
+Two footer rules always apply, because release versions and issue state are
+derived from commits. They read the footers, which are the message's last
+paragraph, so prose in the body such as "Fixes: the race in ..." or
+"Breaking changes: none" is left alone:
+
+- A breaking-change footer is spelled `BREAKING-CHANGE:` (or `BREAKING
+  CHANGE:`, which the spec also allows). `Breaking change:` or `BREAKING:`
+  reads to the version tooling as nothing at all, so the release would come
+  out a patch. In the trailer block it is `BREAKING-CHANGE:`: git reads no
+  trailers from a paragraph holding `BREAKING CHANGE:`, since a trailer key
+  has no space, so a misspelling is told to use the hyphen.
 - `Closes:` (or Fixes/Resolves) only on a branch into main. An issue closes
   when its fix reaches main; a branch into staging says `Refs:` instead, and
   the issue stays open until the promotion.
@@ -67,9 +75,10 @@ TYPES = "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert"
 HEADER_RE = re.compile(
     rf"^(?P<type>{TYPES})(?:\((?P<scope>[a-z0-9_-]+)\))?(?P<bang>!)?: (?P<desc>\S.*)$"
 )
+GIT_REVERT_RE = re.compile(r'^Revert ".+"$')
 MAX_HEADER = 72
 GENERATED_BY = ("dependabot[bot]",)
-__version__ = "0.21.0"
+__version__ = "0.22.0"
 
 # A footer line that names an issue, whether or not git reads it as a trailer.
 LINK_LINE_RE = re.compile(
@@ -95,7 +104,16 @@ def commits(base):
             yield sha, author, header, body, trailers.splitlines()
 
 
+def commit_type(header):
+    if GIT_REVERT_RE.match(header):
+        return "revert"
+    m = HEADER_RE.match(header)
+    return m.group("type") if m else None
+
+
 def header_problems(header, no_scope, allowed):
+    if GIT_REVERT_RE.match(header):
+        return []
     m = HEADER_RE.match(header)
     found = []
     if not m:
@@ -133,11 +151,11 @@ def footer_problems(body, into_main):
         found.append("git reads no trailers from a paragraph with `BREAKING CHANGE:` in it "
                      "(a trailer key has no space), so the rest of that block is lost: "
                      "write `BREAKING-CHANGE:`")
-    for line in body:
+    for line in last:
         b = BREAKING_RE.match(line)
         if b and b.group("token") not in BREAKING_TOKENS:
             found.append(f"`{b.group('token')}:` isn't read as a breaking change, so the "
-                         "release would be a patch: spell it `BREAKING CHANGE:`")
+                         "release would be a patch: spell it `BREAKING-CHANGE:`")
         link = LINK_LINE_RE.match(line)
         if link and not into_main and CLOSING_KEY_RE.match(link.group("key")):
             found.append(f"`{line.strip()}` on a branch that doesn't merge into main: "
@@ -232,8 +250,7 @@ def main():
             continue
         found = header_problems(header, args.no_scope, allowed) + footer_problems(body, into_main)
         problems += [f"{sha}: {header!r}: {p}" for p in found]
-        m = HEADER_RE.match(header)
-        authored.append((sha, m.group("type") if m else None, body, trailers))
+        authored.append((sha, commit_type(header), body, trailers))
     if args.require_issue and authored:
         problems += issue_problems(authored)
 

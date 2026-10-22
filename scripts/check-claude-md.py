@@ -28,17 +28,36 @@ import subprocess
 import sys
 
 SKILL_MAX = 500
-__version__ = "0.21.0"
+__version__ = "0.26.0"
 TODO_RE = re.compile(r"^#+\s*to-?do\b", re.I | re.M)
+# A fence opens with three or more backticks or tildes, indented up to three
+# spaces, and closes on a line of nothing but at least as many of the same.
+FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 # `@` at line start or after whitespace, then something path-shaped. Not
 # `pkg@1.2`, an email address or a DNS selector, all preceded by a non-space.
 IMPORT_RE = re.compile(r"(?:^|\s)@[./~][^\s`]*|(?:^|\s)@[A-Za-z0-9_-]+/[^\s`]*")
 
 
+def strip_fences(text):
+    """Drop fenced code blocks, where `# todo` is a shell comment rather than
+    a heading. An unclosed fence runs to the end, as Markdown renders it."""
+    kept, fence = [], None
+    for line in text.splitlines(keepends=True):
+        m = FENCE_RE.match(line)
+        if fence is None:
+            if m:
+                fence = m.group(1)
+            else:
+                kept.append(line)
+        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
+                and not m.group(2).strip():
+            fence = None
+    return "".join(kept)
+
+
 def strip_code(text):
     """Drop fenced blocks and inline spans, where an @ is not an import."""
-    text = re.sub(r"```.*?```", "", text, flags=re.S)
-    return re.sub(r"`[^`\n]*`", "", text)
+    return re.sub(r"`[^`\n]*`", "", strip_fences(text))
 
 
 def main():
@@ -47,11 +66,13 @@ def main():
     ap.add_argument("--max-lines", type=int, default=200)
     args = ap.parse_args()
 
-    files = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard",
+    # NUL-separated, so a path with a space or a non-ASCII name comes back
+    # whole and unquoted.
+    files = [f for f in subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard",
          "--", "*CLAUDE.md", "*SKILL.md"],
         capture_output=True, text=True, check=True,
-    ).stdout.split()
+    ).stdout.split("\0") if f]
     problems = []
     for name in files:
         path = pathlib.Path(name)
@@ -64,7 +85,7 @@ def main():
         if lines > limit:
             problems.append(f"{name}: {lines} lines, over its {limit}. Move what one "
                             "directory needs into that directory's CLAUDE.md, and procedures into a skill")
-        if TODO_RE.search(text):
+        if TODO_RE.search(strip_fences(text)):
             problems.append(f"{name}: has a TODO heading. Track deferred work as a GitHub issue")
         if not is_skill:
             for m in IMPORT_RE.finditer(strip_code(text)):
