@@ -78,7 +78,7 @@ HEADER_RE = re.compile(
 GIT_REVERT_RE = re.compile(r'^Revert ".+"$')
 MAX_HEADER = 72
 GENERATED_BY = ("dependabot[bot]",)
-__version__ = "0.22.0"
+__version__ = "0.23.0"
 
 # A footer line that names an issue, whether or not git reads it as a trailer.
 LINK_LINE_RE = re.compile(
@@ -92,9 +92,12 @@ RECORD_FORMAT = "%h%x00%an%x00%s%x00%B%x00%(trailers:only,unfold)%x1e"
 
 
 def commits(base):
+    # git prints messages in UTF-8 whatever the locale says, and decoding them
+    # in the locale's encoding miscounts a header's length or fails outright.
+    # A message that isn't UTF-8 at all still gets checked.
     log = subprocess.run(
         ["git", "log", "--no-merges", f"--format={RECORD_FORMAT}", f"{base}..HEAD"],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
     ).stdout
     for record in log.split("\x1e"):
         record = record.strip("\n")
@@ -209,7 +212,7 @@ def target_branch(base, explicit):
     if explicit:
         return explicit
     ref = subprocess.run(["git", "rev-parse", "--verify", "--quiet", "--symbolic-full-name", base],
-                         capture_output=True, text=True).stdout.strip()
+                         capture_output=True, text=True, encoding="utf-8").stdout.strip()
     if ref.startswith("refs/heads/"):
         return ref[len("refs/heads/"):]
     if ref.startswith("refs/remotes/"):
@@ -229,6 +232,10 @@ def main():
     ap.add_argument("--require-issue", action="store_true",
                     help="at least one commit on the branch links an issue")
     args = ap.parse_args()
+    # Findings quote the headers: a character the console can't show is
+    # escaped, not a crash.
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(errors="backslashreplace")
     allowed = [s for s in args.scopes.split(",") if s]
     target = target_branch(args.base, args.target)
     into_main = target in (None, "main")

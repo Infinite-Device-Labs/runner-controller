@@ -22,13 +22,14 @@ For every tracked or new CLAUDE.md and SKILL.md:
   looks short. Refer to other docs by plain path instead.
 """
 import argparse
+import os
 import pathlib
 import re
 import subprocess
 import sys
 
 SKILL_MAX = 500
-__version__ = "0.26.0"
+__version__ = "0.28.0"
 TODO_RE = re.compile(r"^#+\s*to-?do\b", re.I | re.M)
 # A fence opens with three or more backticks or tildes, indented up to three
 # spaces, and closes on a line of nothing but at least as many of the same.
@@ -66,19 +67,37 @@ def main():
     ap.add_argument("--max-lines", type=int, default=200)
     args = ap.parse_args()
 
+    # The files are UTF-8 whatever the locale says, and a character the
+    # console can't show is escaped rather than a crash.
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(errors="backslashreplace")
     # NUL-separated, so a path with a space or a non-ASCII name comes back
-    # whole and unquoted.
-    files = [f for f in subprocess.run(
+    # whole and unquoted. The names are bytes: opened as the filesystem
+    # decodes them, so they open whatever the locale, and shown as the UTF-8
+    # git writes them in.
+    listed = subprocess.run(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard",
          "--", "*CLAUDE.md", "*SKILL.md"],
-        capture_output=True, text=True, check=True,
-    ).stdout.split("\0") if f]
+        capture_output=True,
+    )
+    if listed.returncode == 0:
+        files = [f for f in listed.stdout.split(b"\0") if f]
+    else:
+        # Not a git checkout, such as a copy a repo's lint makes without .git:
+        # walk the tree instead, so the copy is still checked.
+        files = []
+        for top, dirs, names in os.walk(b"."):
+            dirs[:] = [d for d in dirs if d not in (b".git", b"node_modules")
+                       and not (top.endswith(b".claude") and d == b"worktrees")]
+            files += [os.path.relpath(os.path.join(top, n)) for n in names
+                      if n.endswith((b"CLAUDE.md", b"SKILL.md"))]
     problems = []
-    for name in files:
-        path = pathlib.Path(name)
+    for raw in files:
+        path = pathlib.Path(os.fsdecode(raw))
+        name = raw.decode("utf-8", "replace")
         if not path.is_file():
             continue
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         lines = text.count("\n")
         is_skill = path.name == "SKILL.md"
         limit = SKILL_MAX if is_skill else args.max_lines
