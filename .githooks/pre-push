@@ -4,7 +4,7 @@
 # never edit it here.
 # Its own version, raised when it changes, so the session-wrap-up sweep can
 # tell a stale copy from a current one:
-# __version__ = "0.26.0"
+# __version__ = "0.26.1"
 #
 # GitHub's free plan offers no branch protection on a private repository, so
 # nothing server-side can refuse a push that breaks `main`. This hook and the
@@ -33,7 +33,7 @@ pushed=
 while read -r _local_ref local_sha remote_ref _remote_sha; do
     # A deletion's local sha is all zeros, whatever the hash's length.
     case "$local_sha" in
-        *[!0]*) only_deletes= pushed="$pushed $local_sha" ;;
+        *[!0]*) only_deletes=; pushed="$pushed $local_sha" ;;
     esac
     case "$remote_ref" in
         refs/heads/main|refs/heads/staging)
